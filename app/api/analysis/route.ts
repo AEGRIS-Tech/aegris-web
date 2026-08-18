@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 const TOKEN_URL =
   "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
@@ -6,145 +8,783 @@ const TOKEN_URL =
 const STATS_URL =
   "https://sh.dataspace.copernicus.eu/statistics/v1";
 
-export async function GET() {
-  const clientId = process.env.SENTINEL_CLIENT_ID!;
-  const clientSecret = process.env.SENTINEL_CLIENT_SECRET!;
+type BoundaryPoint = {
+  latitude: number;
+  longitude: number;
+};
 
-  const tokenResponse = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
+type GeoJSONPolygon = {
+  type: "Polygon";
+  coordinates: number[][][];
+};
 
-  if (!tokenResponse.ok) {
-    return NextResponse.json(
-      { error: "OAuth selhal" },
-      { status: 500 }
-    );
+function isValidBoundary(
+  boundary: unknown
+): boundary is BoundaryPoint[] {
+  if (!Array.isArray(boundary)) {
+    return false;
   }
 
-  const token = await tokenResponse.json();
+  if (boundary.length < 3) {
+    return false;
+  }
 
-  const accessToken = token.access_token;
+  return boundary.every((point) => {
+    return (
+      point &&
+      typeof point === "object" &&
+      typeof (point as BoundaryPoint).latitude === "number" &&
+      typeof (point as BoundaryPoint).longitude === "number" &&
+      Number.isFinite(
+        (point as BoundaryPoint).latitude
+      ) &&
+      Number.isFinite(
+        (point as BoundaryPoint).longitude
+      ) &&
+      (point as BoundaryPoint).latitude >= -90 &&
+      (point as BoundaryPoint).latitude <= 90 &&
+      (point as BoundaryPoint).longitude >= -180 &&
+      (point as BoundaryPoint).longitude <= 180
+    );
+  });
+}
 
-  const longitude = 14.4378;
-  const latitude = 50.0755;
-
-  const response = await fetch(STATS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      input: {
-        bounds: {
-          bbox: [
-            longitude - 0.001,
-            latitude - 0.001,
-            longitude + 0.001,
-            latitude + 0.001,
-          ],
-        },
-        data: [
-          {
-            type: "sentinel-2-l2a",
-          },
-        ],
-      },
-      aggregation: {
-        timeRange: {
-          from: "2025-06-01T00:00:00Z",
-          to: "2025-08-01T23:59:59Z",
-        },
-        aggregationInterval: {
-          of: "P1D",
-        },
-        width: 64,
-        height: 64,evalscript: `
-//VERSION=3
-
-function setup() {
-  return {
-    input: [{
-      bands: ["B04", "B08", "dataMask"]
-    }],
-    output: [
-      {
-        id: "data",
-        bands: 1
-      },
-      {
-        id: "dataMask",
-        bands: 1
-      }
+function boundaryToGeoJSON(
+  boundary: BoundaryPoint[]
+): GeoJSONPolygon {
+  const coordinates = boundary.map(
+    (point) => [
+      point.longitude,
+      point.latitude,
     ]
-  };
-}
+  );
 
-function evaluatePixel(samples) {
-  const ndvi =
-    (samples.B08 - samples.B04) /
-    (samples.B08 + samples.B04);
+  // Polygon musí být uzavřený.
+  coordinates.push([
+    boundary[0].longitude,
+    boundary[0].latitude,
+  ]);
 
   return {
-    data: [ndvi],
-    dataMask: [samples.dataMask]
+    type: "Polygon",
+    coordinates: [coordinates],
   };
 }
-`,
+
+export async function GET(request: Request) {
+  try {
+    // --------------------------------------------------
+    // 1. SUPABASE / PŘIHLÁŠENÝ UŽIVATEL
+    // --------------------------------------------------
+
+    const cookieStore = await cookies();
+
+const supabase = createServerClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+  {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
 
-      calculations: {
-        default: {
-          statistics: {
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(
+            ({ name, value, options }) => {
+              cookieStore.set(
+                name,
+                value,
+                options
+              );
+            }
+          );
+        } catch {
+          // Cookie update není v tomto místě
+          // kritický pro samotné načtení uživatele.
+        }
+      },
+    },
+  }
+);
+
+const {
+  data: { user },
+  error: userError,
+} = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        {
+          error: "Uživatel není přihlášen.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. PARAMETRY
+    // --------------------------------------------------
+
+    const { searchParams } =
+      new URL(request.url);
+
+    const projectIdParam =
+      searchParams.get("projectId");
+
+    const latitudeParam =
+      searchParams.get("latitude");
+
+    const longitudeParam =
+      searchParams.get("longitude");
+
+    const projectId = projectIdParam
+      ? Number(projectIdParam)
+      : null;
+
+    // --------------------------------------------------
+    // 3. PROJEKT
+    //
+    // Pokud máme projectId, použijeme skutečnou hranici
+    // uloženou u projektu.
+    //
+    // Pokud projectId zatím není k dispozici,
+    // ponecháme starý režim latitude/longitude.
+    // --------------------------------------------------
+
+    let latitude: number | null = null;
+    let longitude: number | null = null;
+
+    let boundary: BoundaryPoint[] | null =
+      null;
+
+    if (
+      projectId !== null &&
+      Number.isFinite(projectId)
+    ) {
+      const {
+        data: project,
+        error: projectError,
+      } = await supabase
+        .from("projects")
+        .select(
+          "id, latitude, longitude, boundary, user_id"
+        )
+        .eq("id", projectId)
+        .eq("user_id", user.id)
+        .single();
+
+      if (projectError || !project) {
+        console.error(
+          "CHYBA NAČTENÍ PROJEKTU:",
+          projectError
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Projekt nebyl nalezen nebo k němu nemáš přístup.",
+          },
+          { status: 404 }
+        );
+      }
+
+      latitude =
+        typeof project.latitude === "number"
+          ? project.latitude
+          : Number(project.latitude);
+
+      longitude =
+        typeof project.longitude === "number"
+          ? project.longitude
+          : Number(project.longitude);
+
+      if (isValidBoundary(project.boundary)) {
+        boundary = project.boundary;
+      }
+    }
+
+    // --------------------------------------------------
+    // 4. ZÁLOŽNÍ REŽIM
+    //
+    // Staré projekty zatím mohou fungovat přes
+    // latitude + longitude.
+    // --------------------------------------------------
+
+    if (
+      latitude === null ||
+      !Number.isFinite(latitude)
+    ) {
+      latitude =
+        latitudeParam !== null
+          ? Number(latitudeParam)
+          : null;
+    }
+
+    if (
+      longitude === null ||
+      !Number.isFinite(longitude)
+    ) {
+      longitude =
+        longitudeParam !== null
+          ? Number(longitudeParam)
+          : null;
+    }
+
+    if (
+      latitude === null ||
+      longitude === null ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Chybí platné souřadnice nebo projectId.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 5. OAUTH COPERNICUS
+    // --------------------------------------------------
+
+    const clientId =
+      process.env.SENTINEL_CLIENT_ID;
+
+    const clientSecret =
+      process.env.SENTINEL_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      return NextResponse.json(
+        {
+          error:
+            "Chybí SENTINEL_CLIENT_ID nebo SENTINEL_CLIENT_SECRET",
+        },
+        { status: 500 }
+      );
+    }
+
+    const tokenResponse = await fetch(
+      TOKEN_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+
+        body: new URLSearchParams({
+          grant_type:
+            "client_credentials",
+
+          client_id: clientId,
+
+          client_secret:
+            clientSecret,
+        }),
+      }
+    );
+
+    if (!tokenResponse.ok) {
+      const errorText =
+        await tokenResponse.text();
+
+      console.error(
+        "OAUTH ERROR:",
+        errorText
+      );
+
+      return NextResponse.json(
+        {
+          error: "OAuth selhal",
+          details: errorText,
+        },
+        { status: 500 }
+      );
+    }
+
+    const token =
+      await tokenResponse.json();
+
+    const accessToken =
+      token.access_token;
+
+    // --------------------------------------------------
+    // 6. EVALSCRIPT NDVI
+    // --------------------------------------------------
+
+    const evalscript = `
+ //VERSION=3
+
+ function setup() {
+   return {
+     input: [
+       {
+         bands: ["B04", "B08", "dataMask"]
+       }
+     ],
+
+     output: [
+       {
+         id: "default",
+         bands: 1,
+         sampleType: "FLOAT32"
+       },
+
+       {
+         id: "dataMask",
+         bands: 1
+       }
+     ]
+   };
+ }
+
+ function evaluatePixel(samples) {
+   const b04 = samples.B04;
+   const b08 = samples.B08;
+
+   const denominator = b08 + b04;
+
+   let ndvi = 0;
+
+   if (denominator !== 0) {
+     ndvi =
+       (b08 - b04) /
+       denominator;
+   }
+
+   return {
+     default: [ndvi],
+     dataMask: [samples.dataMask]
+   };
+ }
+ `;
+
+    // --------------------------------------------------
+    // 7. OBDOBÍ - POSLEDNÍCH 6 MĚSÍCŮ
+    // --------------------------------------------------
+
+    const to = new Date();
+
+    const from = new Date(to);
+
+    from.setUTCMonth(
+      from.getUTCMonth() - 6
+    );
+
+    // --------------------------------------------------
+    // 8. GEOMETRIE PRO COPERNICUS
+    // --------------------------------------------------
+
+    let bounds: Record<string, unknown>;
+
+    if (boundary) {
+      const polygon =
+        boundaryToGeoJSON(boundary);
+
+      bounds = {
+        geometry: polygon,
+      };
+
+      console.log(
+        "AEGRIS ANALYSIS: POUŽÍVÁM HRANICI POZEMKU"
+      );
+
+      console.log(
+        "AEGRIS BOUNDARY:",
+        JSON.stringify(
+          polygon,
+          null,
+          2
+        )
+      );
+    } else {
+      bounds = {
+        bbox: [
+          longitude - 0.001,
+          latitude - 0.001,
+          longitude + 0.001,
+          latitude + 0.001,
+        ],
+      };
+
+      console.log(
+        "AEGRIS ANALYSIS: STARÝ BBOX REŽIM"
+      );
+    }
+
+    // --------------------------------------------------
+    // 9. COPERNICUS STATISTICS API
+    // --------------------------------------------------
+
+    const response = await fetch(
+      STATS_URL,
+      {
+        method: "POST",
+
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+
+          "Content-Type":
+            "application/json",
+
+          Accept:
+            "application/json",
+        },
+
+        body: JSON.stringify({
+  input: {
+    bounds,
+
+    data: [
+      {
+        type: "sentinel-2-l2a",
+
+        dataFilter: {
+          maxCloudCoverage: 20,
+        },
+      },
+    ],
+  },
+
+          aggregation: {
+            timeRange: {
+              from:
+                from.toISOString(),
+
+              to:
+                to.toISOString(),
+            },
+
+            aggregationInterval: {
+              of: "P10D",
+            },
+
+            lastIntervalBehavior:
+              "SHORTEN",
+
+            width: 64,
+
+            height: 64,
+
+            evalscript,
+          },
+
+          calculations: {
             default: {
-              percentiles: {
-                k: [5, 50, 95],
+              statistics: {
+                default: {
+                  percentiles: {
+                    k: [5, 50, 95],
+                  },
+                },
               },
             },
           },
-        },
-      },
-
-      evalscript: `
-//VERSION=3
-
-function setup() {
-  return {
-    input: ["B04", "B08", "dataMask"],
-    output: [
-      {
-        id: "default",
-        bands: 1
-      },
-      {
-        id: "dataMask",
-        bands: 1
+        }),
       }
-    ]
-  };
-}
+    );
 
-function evaluatePixel(sample) {
-  let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
+    // --------------------------------------------------
+    // 10. RAW ODPOVĚĎ
+    // --------------------------------------------------
 
-  return {
-    default: [ndvi],
-    dataMask: [sample.dataMask]
-  };
-}
-`,
-    }),
-  });
-   const json = await response.json();
+    const responseText =
+      await response.text();
 
-  return NextResponse.json(json);
+    console.log(
+      "STATISTICS STATUS:",
+      response.status
+    );
+
+    console.log(
+      "STATISTICS CONTENT-TYPE:",
+      response.headers.get(
+        "content-type"
+      )
+    );
+
+    console.log(
+      "STATISTICS RAW RESPONSE:",
+      responseText
+    );
+
+    // --------------------------------------------------
+    // 11. CHYBA COPERNICUS
+    // --------------------------------------------------
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error:
+            "Statistics API error",
+
+          status:
+            response.status,
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 12. JSON
+    // --------------------------------------------------
+
+    let json: any;
+
+    try {
+      json =
+        JSON.parse(responseText);
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrátil neplatný JSON",
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 13. HISTORIE NDVI
+    // --------------------------------------------------
+
+    const history = (
+      json.data ?? []
+    )
+      .map((item: any) => {
+        const ndvi =
+          item
+            ?.outputs
+            ?.default
+            ?.bands
+            ?.B0
+            ?.stats
+            ?.mean;
+
+        return {
+          from:
+            item?.interval?.from,
+
+          to:
+            item?.interval?.to,
+
+          ndvi:
+            typeof ndvi === "number"
+              ? ndvi
+              : null,
+        };
+      })
+      .filter(
+        (item: any) =>
+          item.from &&
+          item.to &&
+          item.ndvi !== null &&
+          Number.isFinite(
+            item.ndvi
+          )
+      );
+
+    console.log(
+      "NDVI HISTORY:",
+      JSON.stringify(
+        history,
+        null,
+        2
+      )
+    );
+
+    // --------------------------------------------------
+    // 14. SEŘAZENÍ HISTORIE
+    // --------------------------------------------------
+
+    history.sort(
+      (
+        a: any,
+        b: any
+      ) =>
+        new Date(
+          a.from
+        ).getTime() -
+        new Date(
+          b.from
+        ).getTime()
+    );
+
+    // --------------------------------------------------
+    // 15. AKTUÁLNÍ NDVI
+    // --------------------------------------------------
+
+    const firstHistoryItem =
+      history.length > 0
+        ? history[0]
+        : null;
+
+    const lastHistoryItem =
+      history.length > 0
+        ? history[
+            history.length - 1
+          ]
+        : null;
+
+    const startNdvi =
+      firstHistoryItem?.ndvi ??
+      null;
+
+    const currentNdvi =
+      lastHistoryItem?.ndvi ??
+      null;
+
+    // --------------------------------------------------
+    // 16. ZMĚNA NDVI
+    // --------------------------------------------------
+
+    let change: number | null =
+      null;
+
+    if (
+      startNdvi !== null &&
+      currentNdvi !== null
+    ) {
+      change =
+        currentNdvi -
+        startNdvi;
+    }
+
+    // --------------------------------------------------
+    // 17. TREND
+    // --------------------------------------------------
+
+    let trend =
+      "Stabilní";
+
+    if (
+      change !== null
+    ) {
+      if (change <= -0.05) {
+        trend =
+          "Zhoršující se";
+      } else if (
+        change >= 0.05
+      ) {
+        trend =
+          "Zlepšující se";
+      } else {
+        trend =
+          "Stabilní";
+      }
+    }
+
+    // --------------------------------------------------
+    // 18. RIZIKO
+    // --------------------------------------------------
+
+    let risk =
+      "Nízké";
+
+    if (
+      currentNdvi !== null &&
+      currentNdvi < 0.20
+    ) {
+      risk =
+        "Kritické";
+    } else if (
+      change !== null &&
+      change <= -0.15
+    ) {
+      risk =
+        "Kritické";
+    } else if (
+      change !== null &&
+      change <= -0.05
+    ) {
+      risk =
+        "Vysoké";
+    } else if (
+      currentNdvi !== null &&
+      currentNdvi < 0.40
+    ) {
+      risk =
+        "Vysoké";
+    } else if (
+      currentNdvi !== null &&
+      currentNdvi < 0.60
+    ) {
+      risk =
+        "Střední";
+    }
+
+    // --------------------------------------------------
+    // 19. LOG
+    // --------------------------------------------------
+
+    console.log(
+      "AEGRIS ANALYTICKÝ VÝSLEDEK:",
+      {
+        projectId,
+        latitude,
+        longitude,
+        hasBoundary:
+          boundary !== null,
+        boundaryPoints:
+          boundary?.length ?? 0,
+        startNdvi,
+        currentNdvi,
+        change,
+        trend,
+        risk,
+      }
+    );
+
+    // --------------------------------------------------
+    // 20. ODPOVĚĎ
+    // --------------------------------------------------
+
+    return NextResponse.json({
+  projectId,
+  latitude,
+  longitude,
+  hasBoundary: boundary !== null,
+  boundaryPoints: boundary?.length ?? 0,
+  from: from.toISOString(),
+  to: to.toISOString(),
+  count: history.length,
+  ndvi: currentNdvi,
+  startNdvi,
+  currentNdvi,
+  change,
+  trend,
+  risk,
+  history,
+  raw: json,
+});
+  } catch (error) {
+    console.error(
+      "ANALYSIS ROUTE ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Chyba v analysis route",
+
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      { status: 500 }
+    );
+  }
 }
