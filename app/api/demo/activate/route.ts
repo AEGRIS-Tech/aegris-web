@@ -12,26 +12,19 @@ export async function POST(request: Request) {
     const cronSecret = process.env.CRON_SECRET;
 
     if (!cronSecret) {
-      console.error(
-        "CHYBA: CRON_SECRET není nastavený."
-      );
+      console.error("CHYBA: CRON_SECRET není nastavený.");
 
       return NextResponse.json(
         {
-          error:
-            "Server není správně nakonfigurován.",
+          error: "Server není správně nakonfigurován.",
         },
         { status: 500 }
       );
     }
 
-    const authorization =
-      request.headers.get("authorization");
+    const authorization = request.headers.get("authorization");
 
-    if (
-      authorization !==
-      `Bearer ${cronSecret}`
-    ) {
+    if (authorization !== `Bearer ${cronSecret}`) {
       return NextResponse.json(
         {
           error: "Unauthorized",
@@ -65,8 +58,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json(
         {
-          error:
-            "Nepodařilo se načíst DEMO žádosti.",
+          error: "Nepodařilo se načíst DEMO žádosti.",
         },
         { status: 500 }
       );
@@ -76,8 +68,9 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         processed: 0,
-        message:
-          "Žádné nové DEMO žádosti.",
+        failed: 0,
+        total: 0,
+        message: "Žádné nové DEMO žádosti.",
       });
     }
 
@@ -101,52 +94,96 @@ export async function POST(request: Request) {
 
     for (const demoRequest of requests) {
       try {
+        let userId: string | null = null;
+
         // ----------------------------------------
-        // VYTVOŘENÍ AUTH ÚČTU + POZVÁNKA
+        // KONTROLA, ZDA AUTH ÚČET UŽ EXISTUJE
         // ----------------------------------------
 
         const {
-          data: inviteData,
-          error: inviteError,
-        } =
-          await supabaseAdmin.auth.admin.inviteUserByEmail(
-            demoRequest.email,
-            {
-              data: {
-                full_name:
-                  demoRequest.full_name,
-                company:
-                  demoRequest.company,
-                account_type: "demo",
-              },
-              redirectTo,
-            }
-          );
+          data: usersData,
+          error: usersError,
+        } = await supabaseAdmin.auth.admin.listUsers({
+          page: 1,
+          perPage: 1000,
+        });
 
-        if (inviteError) {
+        if (usersError) {
           console.error(
-            `CHYBA POZVÁNKY PRO ${demoRequest.email}:`,
-            inviteError
+            `CHYBA NAČTENÍ AUTH UŽIVATELŮ PRO ${demoRequest.email}:`,
+            usersError
           );
 
           failed++;
           continue;
         }
 
-        const userId =
-          inviteData.user?.id;
+        const existingUser = usersData.users.find(
+          (user) =>
+            user.email?.toLowerCase() ===
+            demoRequest.email.toLowerCase()
+        );
 
-        if (!userId) {
-          console.error(
-            `AUTH UŽIVATEL NEBYL VYTVOŘEN PRO ${demoRequest.email}`
+        // ----------------------------------------
+        // EXISTUJÍCÍ UŽIVATEL
+        // ----------------------------------------
+
+        if (existingUser) {
+          userId = existingUser.id;
+
+          console.log(
+            `AUTH UŽIVATEL UŽ EXISTUJE: ${demoRequest.email} | ${userId}`
           );
-
-          failed++;
-          continue;
         }
 
         // ----------------------------------------
-        // VÝPOČET DOBY DEMO
+        // NOVÝ UŽIVATEL → POZVÁNKA
+        // ----------------------------------------
+
+        if (!userId) {
+          const {
+            data: inviteData,
+            error: inviteError,
+          } =
+            await supabaseAdmin.auth.admin.inviteUserByEmail(
+              demoRequest.email,
+              {
+                data: {
+                  full_name:
+                    demoRequest.full_name,
+                  company:
+                    demoRequest.company,
+                  account_type: "demo",
+                },
+                redirectTo,
+              }
+            );
+
+          if (inviteError) {
+            console.error(
+              `CHYBA POZVÁNKY PRO ${demoRequest.email}:`,
+              inviteError
+            );
+
+            failed++;
+            continue;
+          }
+
+          userId =
+            inviteData.user?.id ?? null;
+
+          if (!userId) {
+            console.error(
+              `AUTH UŽIVATEL NEBYL VYTVOŘEN PRO ${demoRequest.email}`
+            );
+
+            failed++;
+            continue;
+          }
+        }
+
+        // ----------------------------------------
+        // AKTIVACE 14DENNÍHO DEMO
         // ----------------------------------------
 
         const startedAt = new Date();
@@ -203,10 +240,7 @@ export async function POST(request: Request) {
               approved_at:
                 startedAt.toISOString(),
             })
-            .eq(
-              "id",
-              demoRequest.id
-            )
+            .eq("id", demoRequest.id)
             .is("user_id", null)
             .is("approved_at", null);
 
