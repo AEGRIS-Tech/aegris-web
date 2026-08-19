@@ -92,10 +92,12 @@ export default function ProjectDetailPage() {
 
   const [cropName, setCropName] = useState("");
   const [cropVariety, setCropVariety] = useState("");
+  const [cropVarietyError, setCropVarietyError] = useState("");
   const [sowingDate, setSowingDate] = useState("");
   const [expectedHarvestDate, setExpectedHarvestDate] =
     useState("");
   const [areaHa, setAreaHa] = useState("");
+  const [areaError, setAreaError] = useState("");
   const [farmingMethod, setFarmingMethod] = useState("");
   const [growthStage, setGrowthStage] = useState("");
 
@@ -453,6 +455,12 @@ const soilMoisture =
   async function saveCropData() {
     if (!project) return;
 
+    if (!cropVariety.trim()) {
+    setCropVarietyError("ODRŮDA JE POVINNÁ");
+    setSavingCrop(false);
+    return;
+  }
+
     setSavingCrop(true);
 
     const parsedArea =
@@ -461,13 +469,15 @@ const soilMoisture =
         : Number(areaHa);
 
     if (
-      parsedArea !== null &&
-      !Number.isFinite(parsedArea)
-    ) {
-      console.error("NEPLATNÁ VÝMĚRA:");
-      setSavingCrop(false);
-      return;
-    }
+  parsedArea !== null &&
+  (!Number.isFinite(parsedArea) || parsedArea <= 0)
+) {
+  setAreaError("Výměra musí být větší než 0.");
+  setSavingCrop(false);
+  return;
+}
+
+setAreaError("");
 
     const { data, error } = await supabase
       .from("projects")
@@ -1169,8 +1179,64 @@ const soilMoisture =
             <h2 className="mt-1 text-sm font-black">CO JE V PROJEKTU VYSAZENO?</h2>
             <div className="mt-3 space-y-2">
               <label className="block text-[9px] text-slate-500">Pěstovaná plodina<select value={cropName} onChange={(event) => { const nextCrop = event.target.value; setCropName(nextCrop); const nextCropProfile = cropProfiles.find((profile) => profile.name === nextCrop) ?? null; const databaseStages = nextCropProfile ? cropStageProfiles.filter((stageProfile) => stageProfile.crop_profile_id === nextCropProfile.id).map((stageProfile) => stageProfile.growth_stage) : []; const availableStages = databaseStages; if (!availableStages.includes(growthStage)) setGrowthStage(availableStages[0] ?? ""); }} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"><option value="">Vyberte plodinu</option>{cropProfiles.map((profile) => <option key={profile.id} value={profile.name}>{profile.name}</option>)}</select></label>
-              <label className="block text-[9px] text-slate-500">Odrůda<input value={cropVariety} onChange={(event) => setCropVariety(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label>
-              <div className="grid grid-cols-2 gap-2"><label className="block text-[9px] text-slate-500">Plocha (ha)<input type="number" value={areaHa} onChange={(event) => setAreaHa(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label><label className="block text-[9px] text-slate-500">Způsob pěstování<select value={farmingMethod} onChange={(event) => setFarmingMethod(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"><option value="">Vyberte</option><option value="Konvenční">Konvenční</option><option value="Integrované">Integrované</option><option value="Ekologické">Ekologické</option><option value="Jiné">Jiné</option></select></label></div>
+              <label className="block text-[9px] text-slate-500">
+  Odrůda
+  <input
+    value={cropVariety}
+    onChange={(event) => {
+      setCropVariety(event.target.value);
+      setCropVarietyError("");
+    }}
+    className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white ${
+      cropVarietyError
+        ? "border-red-500"
+        : "border-slate-700"
+    }`}
+  />
+
+  {cropVarietyError && (
+    <p className="mt-1 text-xs font-semibold text-red-400">
+      {cropVarietyError}
+    </p>
+  )}
+</label>
+             
+              <div className="grid grid-cols-2 gap-2">
+  <label className="block text-[9px] text-slate-500">
+    Plocha (ha)
+    <input
+      type="number"
+      value={areaHa}
+      onChange={(event) => {
+        setAreaHa(event.target.value);
+        setAreaError("");
+      }}
+      className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white ${
+        areaError ? "border-red-500" : "border-slate-700"
+      }`}
+    />
+    {areaError && (
+      <p className="mt-1 text-xs font-semibold text-red-400">
+        {areaError}
+      </p>
+    )}
+  </label>
+
+  <label className="block text-[9px] text-slate-500">
+    Způsob pěstování
+    <select
+      value={farmingMethod}
+      onChange={(event) => setFarmingMethod(event.target.value)}
+      className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"
+    >
+      <option value="">Vyberte</option>
+      <option value="Konvenční">Konvenční</option>
+      <option value="Integrované">Integrované</option>
+      <option value="Ekologické">Ekologické</option>
+      <option value="Jiné">Jiné</option>
+    </select>
+  </label>
+</div>
               <div className="grid grid-cols-2 gap-2"><label className="block text-[9px] text-slate-500">Datum setí / výsadby<input type="date" value={sowingDate} onChange={(event) => setSowingDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label><label className="block text-[9px] text-slate-500">Předpokládaná sklizeň<input type="date" value={expectedHarvestDate} onChange={(event) => setExpectedHarvestDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label></div>
               <label className="block text-[9px] text-slate-500">Aktuální růstová fáze<select value={growthStage} onChange={(event) => setGrowthStage(event.target.value)} disabled={!cropName} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white disabled:opacity-50"><option value="">Vyberte růstovou fázi</option>{growthStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></label>
               <button type="button" onClick={saveCropData} disabled={savingCrop} className="w-full rounded-lg bg-cyan-500 py-2.5 text-xs font-black text-slate-950 hover:bg-cyan-400 disabled:opacity-50">{savingCrop ? "Ukládám..." : "💾 Uložit údaje o plodině"}</button>
