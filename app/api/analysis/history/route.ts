@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
 const TOKEN_URL =
@@ -7,32 +9,115 @@ const TOKEN_URL =
 const STATS_URL =
   "https://sh.dataspace.copernicus.eu/statistics/v1";
 
-function getDateDaysAgo(days: number) {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString();
-}
-
 type HistoryItem = {
   from: string;
   to: string;
   ndvi: number;
 };
 
-export async function GET(request: Request) {
+type CopernicusStatisticsItem = {
+  interval?: {
+    from?: string;
+    to?: string;
+  };
+  outputs?: {
+    ndvi?: {
+      bands?: {
+        B0?: {
+          stats?: {
+            mean?: number;
+          };
+        };
+      };
+    };
+  };
+};
+
+type CopernicusStatisticsResponse = {
+  data?: CopernicusStatisticsItem[];
+};
+
+function getDateDaysAgo(days: number) {
+  const date = new Date();
+  date.setUTCDate(
+    date.getUTCDate() - days
+  );
+
+  return date.toISOString();
+}
+
+function isCopernicusStatisticsResponse(
+  value: unknown
+): value is CopernicusStatisticsResponse {
+  if (
+    value === null ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  const candidate =
+    value as Record<string, unknown>;
+
+  if (
+    candidate.data !== undefined &&
+    !Array.isArray(candidate.data)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function extractNdvi(
+  item: CopernicusStatisticsItem
+): number | null {
+  const mean =
+    item.outputs
+      ?.ndvi
+      ?.bands
+      ?.B0
+      ?.stats
+      ?.mean;
+
+  if (
+    mean == null ||
+    !Number.isFinite(Number(mean))
+  ) {
+    return null;
+  }
+
+  return Number(mean);
+}
+
+export async function GET(
+  request: Request
+) {
   try {
     // --------------------------------------------------
     // 1. ENV
     // --------------------------------------------------
 
-    const clientId = process.env.SENTINEL_CLIENT_ID;
-    const clientSecret = process.env.SENTINEL_CLIENT_SECRET;
+    const clientId =
+      process.env.SENTINEL_CLIENT_ID;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const clientSecret =
+      process.env.SENTINEL_CLIENT_SECRET;
+
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
     const supabaseServiceKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!clientId || !clientSecret) {
+    const supabasePublishableKey =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+    if (
+      !clientId ||
+      !clientSecret
+    ) {
       return NextResponse.json(
         {
           error:
@@ -42,7 +127,10 @@ export async function GET(request: Request) {
       );
     }
 
-    if (!supabaseUrl || !supabaseServiceKey) {
+    if (
+      !supabaseUrl ||
+      !supabaseServiceKey
+    ) {
       return NextResponse.json(
         {
           error:
@@ -52,30 +140,111 @@ export async function GET(request: Request) {
       );
     }
 
-    // Server-side Supabase klient.
+    if (!supabasePublishableKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Chybí NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. PŘIHLÁŠENÝ UŽIVATEL
+    // --------------------------------------------------
+
+    const cookieStore =
+      await cookies();
+
+    const authSupabase =
+      createServerClient(
+        supabaseUrl,
+        supabasePublishableKey,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
+
+            setAll(cookiesToSet) {
+              try {
+                cookiesToSet.forEach(
+                  ({
+                    name,
+                    value,
+                    options,
+                  }) => {
+                    cookieStore.set(
+                      name,
+                      value,
+                      options
+                    );
+                  }
+                );
+              } catch {
+                // Cookie update není v tomto místě
+                // kritický pro načtení uživatele.
+              }
+            },
+          },
+        }
+      );
+
+    const {
+      data: { user },
+      error: userError,
+    } =
+      await authSupabase.auth.getUser();
+
+    if (
+      userError ||
+      !user
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Uživatel není přihlášen.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // Server-side klient pro DB operace.
     // SERVICE ROLE KEY nikdy neposílat do frontendu.
-    const supabase = createClient(
-      supabaseUrl,
-      supabaseServiceKey
-    );
+    const supabase =
+      createClient(
+        supabaseUrl,
+        supabaseServiceKey
+      );
 
     // --------------------------------------------------
-    // 2. PARAMETRY
+    // 3. PARAMETRY
     // --------------------------------------------------
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
-    const latitude = Number(
-      searchParams.get("latitude")
-    );
+    const latitude =
+      Number(
+        searchParams.get(
+          "latitude"
+        )
+      );
 
-    const longitude = Number(
-      searchParams.get("longitude")
-    );
+    const longitude =
+      Number(
+        searchParams.get(
+          "longitude"
+        )
+      );
 
-    const projectId = Number(
-      searchParams.get("projectId")
-    );
+    const projectId =
+      Number(
+        searchParams.get(
+          "projectId"
+        )
+      );
 
     if (
       !Number.isFinite(latitude) ||
@@ -83,74 +252,180 @@ export async function GET(request: Request) {
     ) {
       return NextResponse.json(
         {
-          error: "Neplatná latitude nebo longitude",
+          error:
+            "Neplatná latitude nebo longitude",
         },
         { status: 400 }
       );
     }
 
-    if (!Number.isFinite(projectId)) {
+    if (
+      !Number.isFinite(projectId)
+    ) {
       return NextResponse.json(
         {
-          error: "Chybí platné projectId",
+          error:
+            "Chybí platné projectId",
         },
         { status: 400 }
       );
     }
 
-    console.log("======================================");
-    console.log("HISTORICKÁ ANALÝZA");
-    console.log("Project ID:", projectId);
-    console.log("Latitude:", latitude);
-    console.log("Longitude:", longitude);
-    console.log("======================================");
+    console.log(
+      "======================================"
+    );
+
+    console.log(
+      "HISTORICKÁ ANALÝZA"
+    );
+
+    console.log(
+      "Project ID:",
+      projectId
+    );
+
+    console.log(
+      "Latitude:",
+      latitude
+    );
+
+    console.log(
+      "Longitude:",
+      longitude
+    );
+
+    console.log(
+      "User ID:",
+      user.id
+    );
+
+    console.log(
+      "======================================"
+    );
 
     // --------------------------------------------------
-    // 3. OAUTH TOKEN
+    // 4. OVĚŘENÍ VLASTNICTVÍ PROJEKTU
     // --------------------------------------------------
 
-    const tokenResponse = await fetch(TOKEN_URL, {
-      method: "POST",
+    const {
+      data: project,
+      error: projectError,
+    } =
+      await supabase
+        .from("projects")
+        .select(
+          "id, user_id"
+        )
+        .eq(
+          "id",
+          projectId
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .single();
 
-      headers: {
-        "Content-Type":
-          "application/x-www-form-urlencoded",
-      },
-
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
-    });
-
-    if (!tokenResponse.ok) {
-      const text = await tokenResponse.text();
-
-      console.error("OAUTH CHYBA:", text);
+    if (
+      projectError ||
+      !project
+    ) {
+      console.error(
+        "CHYBA OVĚŘENÍ PROJEKTU:",
+        projectError
+      );
 
       return NextResponse.json(
         {
-          error: "OAuth selhal",
-          details: text,
+          error:
+            "Projekt nebyl nalezen nebo k němu nemáš přístup.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 5. OAUTH TOKEN
+    // --------------------------------------------------
+
+    const tokenResponse =
+      await fetch(
+        TOKEN_URL,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+
+          body:
+            new URLSearchParams({
+              grant_type:
+                "client_credentials",
+
+              client_id:
+                clientId,
+
+              client_secret:
+                clientSecret,
+            }),
+        }
+      );
+
+    if (
+      !tokenResponse.ok
+    ) {
+      const text =
+        await tokenResponse.text();
+
+      console.error(
+        "OAUTH CHYBA:",
+        text
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "OAuth selhal",
+
+          details:
+            text,
         },
         { status: 500 }
       );
     }
 
-    const token = await tokenResponse.json();
+    const token =
+      (await tokenResponse.json()) as {
+        access_token?: string;
+      };
 
-    const accessToken = token.access_token;
+    const accessToken =
+      token.access_token;
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          error:
+            "OAuth odpověď neobsahuje access_token.",
+        },
+        { status: 500 }
+      );
+    }
 
     // --------------------------------------------------
-    // 4. ČASOVÉ OBDOBÍ
+    // 6. ČASOVÉ OBDOBÍ
     // --------------------------------------------------
 
-    const from = getDateDaysAgo(180);
-    const to = new Date().toISOString();
+    const from =
+      getDateDaysAgo(180);
+
+    const to =
+      new Date().toISOString();
 
     // --------------------------------------------------
-    // 5. OBLAST KOLEM BODU
+    // 7. OBLAST KOLEM BODU
     // --------------------------------------------------
 
     const bbox = [
@@ -161,7 +436,7 @@ export async function GET(request: Request) {
     ];
 
     // --------------------------------------------------
-    // 6. EVALSCRIPT NDVI
+    // 8. EVALSCRIPT NDVI
     // --------------------------------------------------
 
     const evalscript = `
@@ -212,7 +487,7 @@ function evaluatePixel(samples) {
 `;
 
     // --------------------------------------------------
-    // 7. STATISTICS REQUEST
+    // 9. STATISTICS REQUEST
     // --------------------------------------------------
 
     const statsRequest = {
@@ -228,11 +503,15 @@ function evaluatePixel(samples) {
 
         data: [
           {
-            type: "sentinel-2-l2a",
+            type:
+              "sentinel-2-l2a",
 
             dataFilter: {
-              mosaickingOrder: "leastCC",
-              maxCloudCoverage: 30,
+              mosaickingOrder:
+                "leastCC",
+
+              maxCloudCoverage:
+                30,
             },
           },
         ],
@@ -268,29 +547,44 @@ function evaluatePixel(samples) {
     );
 
     // --------------------------------------------------
-    // 8. COPERNICUS
+    // 10. COPERNICUS
     // --------------------------------------------------
 
-    const response = await fetch(STATS_URL, {
-      method: "POST",
+    const response =
+      await fetch(
+        STATS_URL,
+        {
+          method: "POST",
 
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
 
-      body: JSON.stringify(statsRequest),
-    });
+            "Content-Type":
+              "application/json",
 
-    const responseText = await response.text();
+            Accept:
+              "application/json",
+          },
+
+          body:
+            JSON.stringify(
+              statsRequest
+            ),
+        }
+      );
+
+    const responseText =
+      await response.text();
 
     console.log(
       "STATISTICS STATUS:",
       response.status
     );
 
-    if (!response.ok) {
+    if (
+      !response.ok
+    ) {
       console.error(
         "STATISTICS RESPONSE:",
         responseText
@@ -298,73 +592,110 @@ function evaluatePixel(samples) {
 
       return NextResponse.json(
         {
-          error: "Statistics API chyba",
-          status: response.status,
-          response: responseText,
+          error:
+            "Statistics API chyba",
+
+          status:
+            response.status,
+
+          response:
+            responseText,
         },
         { status: 500 }
       );
     }
 
     // --------------------------------------------------
-    // 9. JSON
+    // 11. JSON
     // --------------------------------------------------
 
-    let json: any;
+    let json: unknown;
 
     try {
-      json = JSON.parse(responseText);
+      json =
+        JSON.parse(
+          responseText
+        );
     } catch {
       return NextResponse.json(
         {
           error:
             "Copernicus vrátil neplatný JSON",
-          response: responseText,
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !isCopernicusStatisticsResponse(
+        json
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrátil neočekávanou strukturu JSON.",
         },
         { status: 500 }
       );
     }
 
     // --------------------------------------------------
-    // 10. NDVI HISTORIE
+    // 12. NDVI HISTORIE
     // --------------------------------------------------
 
-    const history: HistoryItem[] = (json.data ?? [])
-      .map((item: any): HistoryItem | null => {
-        const mean =
-          item?.outputs?.ndvi?.bands?.B0?.stats?.mean;
+    const history: HistoryItem[] =
+      (json.data ?? [])
+        .map(
+          (
+            item
+          ): HistoryItem | null => {
+            const mean =
+              extractNdvi(item);
 
-        if (
-          mean == null ||
-          !Number.isFinite(Number(mean))
-        ) {
-          return null;
-        }
+            if (
+              mean === null
+            ) {
+              return null;
+            }
 
-        if (
-          !item?.interval?.from ||
-          !item?.interval?.to
-        ) {
-          return null;
-        }
+            if (
+              !item.interval?.from ||
+              !item.interval.to
+            ) {
+              return null;
+            }
 
-        return {
-          from: item.interval.from,
-          to: item.interval.to,
-          ndvi: Number(mean),
-        };
-      })
-      .filter(
-        (item: HistoryItem | null): item is HistoryItem =>
-          item !== null
-      );
+            return {
+              from:
+                item.interval.from,
 
-    // Seřadíme chronologicky od nejstaršího
-    // po nejnovější.
+              to:
+                item.interval.to,
+
+              ndvi:
+                mean,
+            };
+          }
+        )
+        .filter(
+          (
+            item
+          ): item is HistoryItem =>
+            item !== null
+        );
+
     history.sort(
       (a, b) =>
-        new Date(a.from).getTime() -
-        new Date(b.from).getTime()
+        new Date(
+          a.from
+        ).getTime() -
+        new Date(
+          b.from
+        ).getTime()
     );
 
     console.log(
@@ -378,16 +709,22 @@ function evaluatePixel(samples) {
     );
 
     // --------------------------------------------------
-    // 11. SMAZÁNÍ STARÉ HISTORIE PROJEKTU
+    // 13. SMAZÁNÍ STARÉ HISTORIE PROJEKTU
     // --------------------------------------------------
 
-    const { error: deleteError } =
-      await supabase
-        .from("ndvi_history")
-        .delete()
-        .eq("project_id", projectId);
+    const {
+      error: deleteError,
+    } = await supabase
+      .from("ndvi_history")
+      .delete()
+      .eq(
+        "project_id",
+        projectId
+      );
 
-    if (deleteError) {
+    if (
+      deleteError
+    ) {
       console.error(
         "CHYBA PŘI MAZÁNÍ STARÉ HISTORIE:",
         deleteError
@@ -397,7 +734,9 @@ function evaluatePixel(samples) {
         {
           error:
             "Nepodařilo se smazat starou NDVI historii",
-          details: deleteError.message,
+
+          details:
+            deleteError.message,
         },
         { status: 500 }
       );
@@ -408,25 +747,38 @@ function evaluatePixel(samples) {
     );
 
     // --------------------------------------------------
-    // 12. ULOŽENÍ NOVÉ HISTORIE
+    // 14. ULOŽENÍ NOVÉ HISTORIE
     // --------------------------------------------------
 
-    if (history.length > 0) {
-      const rows = history.map(
-        (item) => ({
-          project_id: projectId,
-          period_from: item.from,
-          period_to: item.to,
-          ndvi: item.ndvi,
-        })
-      );
+    if (
+      history.length > 0
+    ) {
+      const rows =
+        history.map(
+          (item) => ({
+            project_id:
+              projectId,
 
-      const { error: insertError } =
-        await supabase
-          .from("ndvi_history")
-          .insert(rows);
+            period_from:
+              item.from,
 
-      if (insertError) {
+            period_to:
+              item.to,
+
+            ndvi:
+              item.ndvi,
+          })
+        );
+
+      const {
+        error: insertError,
+      } = await supabase
+        .from("ndvi_history")
+        .insert(rows);
+
+      if (
+        insertError
+      ) {
         console.error(
           "CHYBA PŘI UKLÁDÁNÍ NDVI HISTORIE:",
           insertError
@@ -436,7 +788,9 @@ function evaluatePixel(samples) {
           {
             error:
               "Nepodařilo se uložit NDVI historii",
-            details: insertError.message,
+
+            details:
+              insertError.message,
           },
           { status: 500 }
         );
@@ -450,7 +804,7 @@ function evaluatePixel(samples) {
     }
 
     // --------------------------------------------------
-    // 13. ANALYTIKA TRENDU
+    // 15. ANALYTIKA TRENDU
     // --------------------------------------------------
 
     const firstHistoryItem =
@@ -460,62 +814,94 @@ function evaluatePixel(samples) {
 
     const lastHistoryItem =
       history.length > 0
-        ? history[history.length - 1]
+        ? history[
+            history.length - 1
+          ]
         : null;
 
     const startNdvi =
-      firstHistoryItem?.ndvi ?? null;
+      firstHistoryItem?.ndvi ??
+      null;
 
     const currentNdvi =
-      lastHistoryItem?.ndvi ?? null;
+      lastHistoryItem?.ndvi ??
+      null;
 
-    let change: number | null = null;
+    let change:
+      | number
+      | null = null;
 
     if (
       startNdvi !== null &&
       currentNdvi !== null
     ) {
       change =
-        currentNdvi - startNdvi;
+        currentNdvi -
+        startNdvi;
     }
 
     // --------------------------------------------------
-    // 14. URČENÍ TRENDU
+    // 16. URČENÍ TRENDU
     // --------------------------------------------------
 
-    let trend = "Stabilní";
+    let trend =
+      "Stabilní";
 
-    if (change !== null) {
-      if (change > 0.05) {
-        trend = "Zlepšující se";
-      } else if (change < -0.05) {
-        trend = "Zhoršující se";
+    if (
+      change !== null
+    ) {
+      if (
+        change > 0.05
+      ) {
+        trend =
+          "Zlepšující se";
+      } else if (
+        change < -0.05
+      ) {
+        trend =
+          "Zhoršující se";
       }
     }
 
     // --------------------------------------------------
-    // 15. URČENÍ RIZIKA
+    // 17. URČENÍ RIZIKA
     // --------------------------------------------------
 
-    let risk = "Nízké";
+    let risk =
+      "Nízké";
 
-    if (currentNdvi === null) {
-      risk = "Neznámé";
-    } else if (currentNdvi < 0.20) {
-      risk = "Kritické";
-    } else if (currentNdvi < 0.40) {
-      risk = "Vysoké";
-    } else if (currentNdvi < 0.60) {
-      risk = "Střední";
+    if (
+      currentNdvi === null
+    ) {
+      risk =
+        "Neznámé";
+    } else if (
+      currentNdvi < 0.20
+    ) {
+      risk =
+        "Kritické";
+    } else if (
+      currentNdvi < 0.40
+    ) {
+      risk =
+        "Vysoké";
+    } else if (
+      currentNdvi < 0.60
+    ) {
+      risk =
+        "Střední";
     } else {
-      risk = "Nízké";
+      risk =
+        "Nízké";
     }
 
     // --------------------------------------------------
-    // 16. PROCENTUÁLNÍ ZMĚNA
+    // 18. PROCENTUÁLNÍ ZMĚNA
     // --------------------------------------------------
 
-    let changePercent: number | null = null;
+    let changePercent:
+      | number
+      | null = null;
 
     if (
       startNdvi !== null &&
@@ -523,13 +909,16 @@ function evaluatePixel(samples) {
       startNdvi !== 0
     ) {
       changePercent =
-        ((currentNdvi - startNdvi) /
-          Math.abs(startNdvi)) *
+        ((currentNdvi -
+          startNdvi) /
+          Math.abs(
+            startNdvi
+          )) *
         100;
     }
 
     // --------------------------------------------------
-    // 17. LOG ANALYTIKY
+    // 19. LOG ANALYTIKY
     // --------------------------------------------------
 
     console.log(
@@ -575,7 +964,7 @@ function evaluatePixel(samples) {
     );
 
     // --------------------------------------------------
-    // 18. ODPOVĚĎ FRONTENDU
+    // 20. ODPOVĚĎ FRONTENDU
     // --------------------------------------------------
 
     return NextResponse.json({
@@ -586,31 +975,26 @@ function evaluatePixel(samples) {
       from,
       to,
 
-      count: history.length,
+      count:
+        history.length,
 
-      // Historie
       history,
 
-      // Aktuální historické NDVI
-      ndvi: currentNdvi,
+      ndvi:
+        currentNdvi,
+
       currentNdvi,
 
-      // První dostupné NDVI
       startNdvi,
 
-      // Absolutní změna
       change,
 
-      // Procentuální změna
       changePercent,
 
-      // Slovní trend
       trend,
 
-      // Riziko podle aktuálního NDVI
       risk,
     });
-
   } catch (error) {
     console.error(
       "HISTORICKÁ ANALÝZA CHYBA:",

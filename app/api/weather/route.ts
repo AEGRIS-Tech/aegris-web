@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
       "relative_humidity_2m",
       "precipitation",
       "wind_speed_10m",
-      "soil_moisture_0_to_1cm",
+      "soil_moisture_9_to_27cm",
     ].join(",")
   );
 
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       "precipitation",
       "precipitation_probability",
       "temperature_2m",
-      "soil_moisture_0_to_1cm",
+      "soil_moisture_9_to_27cm",
     ].join(",")
   );
 
@@ -269,13 +269,6 @@ export async function GET(request: NextRequest) {
         ? daily.temperature_2m_max
         : [];
 
-    const dailyPrecipitation: unknown[] =
-      Array.isArray(
-        daily.precipitation_sum
-      )
-        ? daily.precipitation_sum
-        : [];
-
     const dailyEvapotranspiration: unknown[] =
       Array.isArray(
         daily.et0_fao_evapotranspiration
@@ -311,7 +304,7 @@ export async function GET(request: NextRequest) {
 
     const soilMoistureRaw =
       numberOrNull(
-        current.soil_moisture_0_to_1cm
+        current.soil_moisture_9_to_27cm,
       );
 
     const soilMoisture =

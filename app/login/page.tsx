@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -67,9 +70,9 @@ export default function LoginPage() {
         return;
       }
 
-      // Plný request na dashboard.
-      window.location.assign("/dashboard");
-    } catch (error) {
+      // Přechod na dashboard.
+      router.push("/dashboard");
+    } catch (error: unknown) {
       console.error(
         "NEOČEKÁVANÁ LOGIN CHYBA:",
         error
@@ -88,7 +91,6 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
       <div className="w-full max-w-md rounded-3xl bg-slate-900 p-8 shadow-2xl">
-
         <div className="mb-8 text-center">
           <h1 className="text-4xl font-bold text-cyan-400">
             AEGRIS

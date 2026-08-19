@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useParams } from "next/navigation";
 import ProjectMap from "./ProjectMap";
@@ -38,6 +38,7 @@ import {
   type ContextEvaluation,
   type CropProfile,
   type CropStageProfile,
+  type ProjectSoilProfile,
   type NdviHistory,
   type WeatherData,
 } from "@/lib/supabase/aegris/decision-engine";
@@ -76,6 +77,8 @@ export default function ProjectDetailPage() {
   const params = useParams();
 
   const [project, setProject] = useState<Project | null>(null);
+  const [soilProfile, setSoilProfile] =
+    useState<ProjectSoilProfile | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<Analysis[]>([]);
   const [recommendationHistory, setRecommendationHistory] =
@@ -99,12 +102,6 @@ export default function ProjectDetailPage() {
   const [savingCrop, setSavingCrop] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const analysisRunRef = useRef(false);
-
-  useEffect(() => {
-    loadProject();
-    loadCropProfiles();
-    loadCropStageProfiles();
-  }, []);
 
   async function loadCropProfiles() {
     const { data, error } = await supabase
@@ -144,7 +141,7 @@ export default function ProjectDetailPage() {
     );
   }
 
-  async function loadProject() {
+  const loadProject = useCallback(async () => {
     const projectId = Number(params.id);
 
     if (!Number.isFinite(projectId)) {
@@ -175,6 +172,27 @@ export default function ProjectDetailPage() {
     const currentProject = projectData as Project;
 
     setProject(currentProject);
+
+    const {
+  data: soilProfileData,
+  error: soilProfileError,
+} = await supabase
+  .from("project_soil_profiles")
+  .select("*")
+  .eq("project_id", currentProject.id)
+  .maybeSingle();
+
+if (soilProfileError) {
+  console.error(
+    "CHYBA NAČTENÍ PŮDNÍHO PROFILU:",
+    soilProfileError
+  );
+  setSoilProfile(null);
+} else {
+  setSoilProfile(
+    (soilProfileData ?? null) as ProjectSoilProfile | null
+  );
+}
     await loadWeather(currentProject.latitude, currentProject.longitude);
 
     setCropName(currentProject.crop_name ?? "");
@@ -296,7 +314,17 @@ export default function ProjectDetailPage() {
     } else {
       setNdviHistory(ndviHistoryData ?? []);
     }
-  }
+  }, [params.id]);
+
+  // This effect intentionally loads remote project data and updates React state.
+  // The react-hooks/set-state-in-effect rule is not applicable to this data-fetching effect.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    loadProject();
+    loadCropProfiles();
+    loadCropStageProfiles();
+  }, [loadProject]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function loadWeather(latitude: number, longitude: number) {
   setLoadingWeather(true);
@@ -349,10 +377,19 @@ export default function ProjectDetailPage() {
       numericOrNull(current?.wind_speed_10m) ??
       numericOrNull(current?.wind_speed);
 
-    const soilMoisture = numericOrNull(
-      current?.soil_moisture_pct ??
-        source?.soil_moisture_pct
-    );
+    const soilMoistureRaw = numericOrNull(
+  current?.soil_moisture_pct ??
+    source?.soil_moisture_pct ??
+    current?.soil_moisture_0_to_1cm ??
+    source?.soil_moisture_0_to_1cm
+);
+
+const soilMoisture =
+  soilMoistureRaw != null &&
+  soilMoistureRaw >= 0 &&
+  soilMoistureRaw <= 1
+    ? soilMoistureRaw * 100
+    : soilMoistureRaw;
 
     const precipitationProbability = numericOrNull(
       source?.precipitation_probability_pct
@@ -516,7 +553,8 @@ export default function ProjectDetailPage() {
         growthStage,
         weather,
         ndviHistory,
-        analysisCreatedAt
+        analysisCreatedAt,
+        soilProfile
       );
 
       // DB tabulka analysis používá starší pole "risk".
@@ -834,24 +872,22 @@ export default function ProjectDetailPage() {
     growthStage,
     weather,
     ndviHistory,
-    analysis?.created_at ?? null
+    analysis?.created_at ?? null,
+    soilProfile
   );
 
-  console.log("AEGRIS UI CONTEXT DEBUG", {
-    crop: selectedCropProfile?.name,
-    growthStage,
-    ndvi: analysis?.ndvi != null ? Number(analysis.ndvi) : null,
-    score: contextEvaluation.score,
-    scoreLevel: contextEvaluation.scoreLevel,
-    level: contextEvaluation.level,
-    priority: contextEvaluation.priority,
-    criticalFactorCount: contextEvaluation.criticalFactorCount,
-    warningFactorCount: contextEvaluation.warningFactorCount,
-    evaluatedFactorCount: contextEvaluation.evaluatedFactorCount,
-    dataCompletenessPct: contextEvaluation.dataCompletenessPct,
-    trend: contextEvaluation.trend,
-    scoreBreakdown: contextEvaluation.scoreBreakdown,
-  });
+  console.log("AEGRIS CONTEXT RESULT", {
+  score: contextEvaluation.score,
+  scoreLevel: contextEvaluation.scoreLevel,
+  level: contextEvaluation.level,
+  priority: contextEvaluation.priority,
+  criticalFactorCount: contextEvaluation.criticalFactorCount,
+  warningFactorCount: contextEvaluation.warningFactorCount,
+  evaluatedFactorCount: contextEvaluation.evaluatedFactorCount,
+  dataCompletenessPct: contextEvaluation.dataCompletenessPct,
+  scoreBreakdown: contextEvaluation.scoreBreakdown,
+  factors: contextEvaluation.factors,
+});
 
   const priorityClass =
     contextEvaluation.priority === "Kritická"

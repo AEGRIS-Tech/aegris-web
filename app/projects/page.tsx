@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { User } from "@supabase/supabase-js";
 
@@ -81,6 +82,7 @@ const projectActions = [
 ];
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,7 +94,7 @@ export default function ProjectsPage() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        window.location.href = "/login";
+        router.push("/login");
         return;
       }
 
@@ -102,7 +104,7 @@ export default function ProjectsPage() {
     }
 
     init();
-  }, []);
+  }, [router]);
 
   async function loadProjects(userId: string) {
     const { data, error } = await supabase
@@ -183,7 +185,7 @@ export default function ProjectsPage() {
               type="button"
               onClick={async () => {
                 await supabase.auth.signOut();
-                window.location.href = "/login";
+                router.push("/login");
               }}
               className="rounded-xl border border-red-500/30 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500/10"
             >

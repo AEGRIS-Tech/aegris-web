@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import WorldMap from "./components/WorldMap";
 import NewProjectModal from "./components/NewProjectModal";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 
 type Project = {
   id?: number;
@@ -24,6 +25,8 @@ type AnalysisResult = {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<User | null>(null);
 
@@ -55,6 +58,91 @@ export default function DashboardPage() {
     useState("");
 
   // =========================================================
+  // LOAD LATEST ANALYSIS
+  // =========================================================
+
+  const loadLatestAnalysis = useCallback(
+    async (projectId: number) => {
+      setAnalysisError("");
+
+      const { data, error } = await supabase
+        .from("analysis")
+        .select(
+          "ndvi, vegetation, risk, created_at"
+        )
+        .eq("project_id", projectId)
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error(
+          "CHYBA NAČTENÍ ANALÝZY:",
+          error
+        );
+        return;
+      }
+
+      if (data) {
+        setAnalysis({
+          ndvi: Number(data.ndvi),
+          vegetation: Number(data.vegetation),
+          risk: String(data.risk),
+          created_at: data.created_at,
+        });
+      } else {
+        setAnalysis(null);
+      }
+    },
+    []
+  );
+
+  // =========================================================
+  // LOAD PROJECTS
+  // =========================================================
+
+  const loadProjects = useCallback(
+    async (userId: string) => {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", {
+          ascending: false,
+        });
+
+      if (error) {
+        console.error(
+          "CHYBA NAČTENÍ PROJEKTŮ:",
+          error
+        );
+        return;
+      }
+
+      const loadedProjects =
+        (data as Project[]) ?? [];
+
+      setProjects(loadedProjects);
+
+      // Automaticky vyber nejnovější projekt
+      if (loadedProjects.length > 0) {
+        const firstProject = loadedProjects[0];
+
+        setSelectedProject(firstProject);
+
+        if (firstProject.id) {
+          await loadLatestAnalysis(
+            firstProject.id
+          );
+        }
+      }
+    },
+    [loadLatestAnalysis]
+  );
+
+  // =========================================================
   // INITIAL LOAD
   // =========================================================
 
@@ -65,7 +153,7 @@ export default function DashboardPage() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        window.location.assign("/login");
+        router.push("/login");
         return;
       }
 
@@ -75,88 +163,7 @@ export default function DashboardPage() {
     }
 
     init();
-  }, []);
-
-  // =========================================================
-  // LOAD PROJECTS
-  // =========================================================
-
-  async function loadProjects(userId: string) {
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (error) {
-      console.error(
-        "CHYBA NAČTENÍ PROJEKTŮ:",
-        error
-      );
-      return;
-    }
-
-    const loadedProjects =
-      (data as Project[]) ?? [];
-
-    setProjects(loadedProjects);
-
-    // Automaticky vyber nejnovější projekt
-    if (loadedProjects.length > 0) {
-      const firstProject = loadedProjects[0];
-
-      setSelectedProject(firstProject);
-
-      if (firstProject.id) {
-        await loadLatestAnalysis(
-          firstProject.id
-        );
-      }
-    }
-  }
-
-  // =========================================================
-  // LOAD LATEST ANALYSIS
-  // =========================================================
-
-  async function loadLatestAnalysis(
-    projectId: number
-  ) {
-    setAnalysisError("");
-
-    const { data, error } = await supabase
-      .from("analysis")
-      .select(
-        "ndvi, vegetation, risk, created_at"
-      )
-      .eq("project_id", projectId)
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error(
-        "CHYBA NAČTENÍ ANALÝZY:",
-        error
-      );
-      return;
-    }
-
-    if (data) {
-      setAnalysis({
-        ndvi: Number(data.ndvi),
-        vegetation: Number(data.vegetation),
-        risk: String(data.risk),
-        created_at: data.created_at,
-      });
-    } else {
-      setAnalysis(null);
-    }
-  }
+  }, [loadProjects, router]);
 
   // =========================================================
   // AI ANALYSIS
@@ -341,7 +348,7 @@ export default function DashboardPage() {
       return;
     }
 
-    window.location.assign("/");
+    router.push("/");
   }
 
   // =========================================================
@@ -835,14 +842,11 @@ export default function DashboardPage() {
                 <WorldMap
                   projects={projects}
                   onLocationSelect={(location) => {
-                    // Kliknutí na existující projekt
                     if (location.id) {
                       selectProject(location);
                       return;
                     }
 
-                    // Kliknutí na prázdné místo mapy:
-                    // uložíme skutečné souřadnice a otevřeme modal.
                     setNewLocation({
                       latitude: location.latitude,
                       longitude: location.longitude,
@@ -877,8 +881,6 @@ export default function DashboardPage() {
 
               </div>
 
-              {/* PROJECT */}
-
               <div className="rounded-2xl border border-cyan-400/10 bg-cyan-400/[0.03] p-5">
 
                 <div className="text-xs uppercase tracking-wider text-slate-600">
@@ -890,8 +892,6 @@ export default function DashboardPage() {
                 </div>
 
               </div>
-
-              {/* LOCATION */}
 
               <div className="mt-3 grid grid-cols-2 gap-3">
 
@@ -921,8 +921,6 @@ export default function DashboardPage() {
 
               </div>
 
-              {/* STATUS */}
-
               <div className="mt-3 rounded-2xl bg-slate-950/40 p-4">
 
                 <div className="flex items-center justify-between">
@@ -938,8 +936,6 @@ export default function DashboardPage() {
                 </div>
 
               </div>
-
-              {/* ANALYSIS */}
 
               {analysis && (
                 <div className="mt-3">
@@ -994,15 +990,11 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* ERROR */}
-
               {analysisError && (
                 <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
                   {analysisError}
                 </div>
               )}
-
-              {/* AI BUTTON */}
 
               <button
                 type="button"
@@ -1206,7 +1198,9 @@ export default function DashboardPage() {
       {editModalOpen && editingProject && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-[#020617] p-6 shadow-2xl">
+
             <div className="mb-6">
+
               <div className="text-xs uppercase tracking-[0.2em] text-cyan-400">
                 Projekt
               </div>
@@ -1218,10 +1212,13 @@ export default function DashboardPage() {
               <p className="mt-1 text-sm text-slate-500">
                 Uprav název, souřadnice nebo status projektu.
               </p>
+
             </div>
 
             <div className="space-y-4">
+
               <label className="block">
+
                 <span className="mb-2 block text-sm font-medium text-slate-300">
                   Název projektu
                 </span>
@@ -1237,10 +1234,13 @@ export default function DashboardPage() {
                   }
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                 />
+
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
+
                 <label className="block">
+
                   <span className="mb-2 block text-sm font-medium text-slate-300">
                     Latitude
                   </span>
@@ -1257,9 +1257,11 @@ export default function DashboardPage() {
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                   />
+
                 </label>
 
                 <label className="block">
+
                   <span className="mb-2 block text-sm font-medium text-slate-300">
                     Longitude
                   </span>
@@ -1276,10 +1278,13 @@ export default function DashboardPage() {
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                   />
+
                 </label>
+
               </div>
 
               <label className="block">
+
                 <span className="mb-2 block text-sm font-medium text-slate-300">
                   Status
                 </span>
@@ -1295,10 +1300,13 @@ export default function DashboardPage() {
                   }
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                 />
+
               </label>
+
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
+
               <button
                 type="button"
                 onClick={() => {
@@ -1317,7 +1325,9 @@ export default function DashboardPage() {
               >
                 Uložit změny
               </button>
+
             </div>
+
           </div>
         </div>
       )}
@@ -1327,47 +1337,47 @@ export default function DashboardPage() {
       {/* ================================================= */}
 
       <NewProjectModal
-  open={modalOpen}
-  latitude={newLocation.latitude}
-  longitude={newLocation.longitude}
-  onClose={() =>
-    setModalOpen(false)
-  }
-  onSave={async (project) => {
-    if (!user) return;
+        open={modalOpen}
+        latitude={newLocation.latitude}
+        longitude={newLocation.longitude}
+        onClose={() =>
+          setModalOpen(false)
+        }
+        onSave={async (project) => {
+          if (!user) return;
 
-    const { error } =
-      await supabase
-        .from("projects")
-        .insert([
-          {
-            name: project.name,
-            latitude: project.latitude,
-            longitude: project.longitude,
-            status: project.status,
-            boundary: project.boundary,
-            user_id: user.id,
-          },
-        ]);
+          const { error } =
+            await supabase
+              .from("projects")
+              .insert([
+                {
+                  name: project.name,
+                  latitude: project.latitude,
+                  longitude: project.longitude,
+                  status: project.status,
+                  boundary: project.boundary,
+                  user_id: user.id,
+                },
+              ]);
 
-    if (error) {
-      console.error(
-        "CHYBA ULOŽENÍ PROJEKTU:",
-        error
-      );
-      return;
-    }
+          if (error) {
+            console.error(
+              "CHYBA ULOŽENÍ PROJEKTU:",
+              error
+            );
+            return;
+          }
 
-    await loadProjects(user.id);
+          await loadProjects(user.id);
 
-    setSelectedProject({
-      ...project,
-      id: undefined,
-    });
+          setSelectedProject({
+            ...project,
+            id: undefined,
+          });
 
-    setModalOpen(false);
-  }}
-  />
+          setModalOpen(false);
+        }}
+      />
 
     </main>
   );
