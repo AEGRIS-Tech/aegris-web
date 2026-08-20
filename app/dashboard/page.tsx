@@ -1171,6 +1171,15 @@ await loadProjects(user.id);
                       </div>
                     </button>
 
+                    {project.id && (
+  <Link
+    href={`/projects/${project.id}`}
+    className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
+  >
+    Otevřít detail projektu →
+  </Link>
+)}
+
                     <button
                       type="button"
                       onClick={() =>
