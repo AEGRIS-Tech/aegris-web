@@ -157,9 +157,31 @@ export default function DashboardPage() {
         return;
       }
 
-      setUser(user);
+      const { data: profile, error: profileError } =
+  await supabase
+    .from("profiles")
+    .select("account_type, demo_expires_at")
+    .eq("id", user.id)
+    .maybeSingle();
 
-      await loadProjects(user.id);
+if (profileError) {
+  console.error("CHYBA NAČTENÍ PROFILU:", profileError);
+  router.push("/login");
+  return;
+}
+
+if (
+  profile?.account_type === "demo" &&
+  profile.demo_expires_at &&
+  new Date(profile.demo_expires_at) <= new Date()
+) {
+  router.push("/login");
+  return;
+}
+
+setUser(user);
+
+await loadProjects(user.id);
     }
 
     init();
