@@ -108,14 +108,41 @@ export async function POST(request: Request) {
       );
     }
 
+        // ============================================
+    // OKAMŽITÁ AKTIVACE DEMO
+    // ============================================
+
+    const activationUrl = new URL(
+      "/api/demo/activate",
+      request.url
+    );
+
+    const activationResponse = await fetch(
+      activationUrl.toString(),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.CRON_SECRET}`,
+        },
+      }
+    );
+
+    if (!activationResponse.ok) {
+      console.error(
+        "OKAMŽITÁ AKTIVACE DEMO SELHALA:",
+        await activationResponse.text()
+      );
+    }
+
     return NextResponse.json(
       {
         success: true,
         message:
-          "Vaši žádost jsme přijali. DEMO vám aktivujeme nejpozději do 24 hodin.",
+          "Vaši žádost jsme přijali. DEMO účet bude aktivován a přístupové údaje vám přijdou e-mailem.",
       },
       { status: 201 }
     );
+    
   } catch (error) {
     console.error(
       "CHYBA DEMO API:",
