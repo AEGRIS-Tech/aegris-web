@@ -14,18 +14,109 @@ export default function AcceptInvitePage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
     async function initializeInvite() {
-      setErrorMessage("");
+      try {
+        setErrorMessage("");
 
-      const code = new URLSearchParams(window.location.search).get("code");
+        // =====================================================
+        // 1. PŘEČTEME TOKENY Z URL FRAGMENTU
+        // =====================================================
 
-      if (code) {
-        const { error } =
-          await supabase.auth.exchangeCodeForSession(code);
+        const hash = window.location.hash;
 
-        if (error) {
+        if (hash) {
+          const params = new URLSearchParams(
+            hash.substring(1)
+          );
+
+          const accessToken =
+            params.get("access_token");
+
+          const refreshToken =
+            params.get("refresh_token");
+
+          const authError =
+            params.get("error_description");
+
+          if (authError) {
+            console.error(
+              "SUPABASE INVITE ERROR:",
+              authError
+            );
+
+            if (mounted) {
+              setErrorMessage(
+                "Pozvánka je neplatná nebo již vypršela."
+              );
+              setLoading(false);
+            }
+
+            return;
+          }
+
+          // =================================================
+          // 2. VYTVOŘÍME SESSION Z TOKENŮ
+          // =================================================
+
+          if (accessToken && refreshToken) {
+            console.log(
+              "AEGRIS: INVITE TOKEN NALEZEN"
+            );
+
+            const {
+              data,
+              error,
+            } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (error || !data.session) {
+              console.error(
+                "INVITE SET SESSION ERROR:",
+                error
+              );
+
+              if (mounted) {
+                setErrorMessage(
+                  "Pozvánku se nepodařilo ověřit."
+                );
+                setLoading(false);
+              }
+
+              return;
+            }
+
+            console.log(
+              "AEGRIS: INVITE SESSION VYTVOŘENA",
+              data.session.user.email
+            );
+
+            // Token už nepotřebujeme v URL.
+            window.history.replaceState(
+              {},
+              document.title,
+              window.location.pathname
+            );
+          }
+        }
+
+        // =====================================================
+        // 3. OVĚŘÍME, ŽE SESSION EXISTUJE
+        // =====================================================
+
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (error || !session) {
           console.error(
-            "INVITE CODE ERROR:",
+            "INVITE SESSION ERROR:",
             error
           );
 
@@ -36,28 +127,34 @@ export default function AcceptInvitePage() {
           setLoading(false);
           return;
         }
-      }
 
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+        console.log(
+          "AEGRIS: DEMO UŽIVATEL PŘIHLÁŠEN:",
+          session.user.email
+        );
 
-      if (error || !session) {
+        setLoading(false);
+      } catch (error) {
         console.error(
-          "INVITE SESSION ERROR:",
+          "INVITE INITIALIZATION ERROR:",
           error
         );
 
-        setErrorMessage(
-          "Pozvánka je neplatná nebo již vypršela."
-        );
-      }
+        if (mounted) {
+          setErrorMessage(
+            "Pozvánku se nepodařilo ověřit."
+          );
 
-      setLoading(false);
+          setLoading(false);
+        }
+      }
     }
 
     initializeInvite();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   async function handleSetPassword() {
@@ -100,8 +197,16 @@ export default function AcceptInvitePage() {
       return;
     }
 
+    console.log(
+      "AEGRIS: HESLO NASTAVENO"
+    );
+
     router.replace("/dashboard");
   }
+
+  // ===========================================================
+  // LOADING
+  // ===========================================================
 
   if (loading) {
     return (
@@ -113,9 +218,14 @@ export default function AcceptInvitePage() {
     );
   }
 
+  // ===========================================================
+  // PAGE
+  // ===========================================================
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
       <div className="w-full max-w-md rounded-3xl bg-slate-900 p-8 shadow-2xl">
+
         <div className="mb-8 text-center">
           <h1 className="text-4xl font-bold text-cyan-400">
             AEGRIS
@@ -133,7 +243,8 @@ export default function AcceptInvitePage() {
         ) : (
           <>
             <p className="mb-6 text-sm leading-6 text-slate-400">
-              Nastavte si heslo pro přístup do vašeho AEGRIS DEMO účtu.
+              Nastavte si heslo pro přístup do vašeho
+              AEGRIS DEMO účtu.
             </p>
 
             <div className="mb-4">
