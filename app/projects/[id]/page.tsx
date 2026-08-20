@@ -998,7 +998,7 @@ setAreaError("");
               <div className="text-[10px] uppercase tracking-widest text-slate-600">Status</div>
               <div className="mt-1 text-sm font-bold text-emerald-400">{project.status}</div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3">
                 <div className="text-[10px] uppercase tracking-widest text-slate-600">Šířka</div>
                 <div className="mt-1 text-xs font-semibold text-slate-200">{project.latitude.toFixed(6)}</div>
@@ -1014,7 +1014,7 @@ setAreaError("");
             <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-wide text-slate-100">◒ Aktuální stav vegetace</h2>
-                <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-lg border border-slate-800">
+                <div className="mt-4 grid-cols-1 sm:grid-cols-3 overflow-hidden rounded-lg border border-slate-800">
                   <div className="border-r border-slate-800 bg-[#061022] p-3">
                     <div className="text-[10px] uppercase tracking-widest text-slate-500">NDVI</div>
                     <div className="mt-1 text-2xl font-black text-cyan-400">{currentNdvi != null ? currentNdvi.toFixed(3) : "—"}</div>
@@ -1039,7 +1039,7 @@ setAreaError("");
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-800 bg-[#061022]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 overflow-hidden rounded-lg border border-slate-800 bg-[#061022]">
                 <div className="flex flex-col items-center justify-center border-r border-slate-800 p-4 text-center">
                   <div className="text-[9px] uppercase tracking-widest text-slate-500">Kontextové vyhodnocení</div>
                   <div className="relative mt-3 flex h-28 w-28 items-center justify-center rounded-full border-[9px] border-slate-800">
@@ -1076,7 +1076,7 @@ setAreaError("");
             <div className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-400">CO SE DĚJE</div>
             <h3 className="mt-2 text-xl font-black">{decisionTitle}</h3>
             <p className="mt-2 text-xs leading-5 text-slate-400">{contextEvaluation.summary}</p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="mt-3 grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">NDVI</div><div className="mt-1 text-lg font-black text-cyan-400">{currentNdvi?.toFixed(3) ?? "—"}</div></div>
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">TREND</div><div className={`mt-1 text-sm font-black ${recommendationTrend.className}`}>{recommendationTrend.label === "Vývoj se zhoršuje" ? "Dlouhodobě klesající" : recommendationTrend.label === "Porost se zlepšuje" ? "Dlouhodobě rostoucí" : recommendationTrend.label === "Vývoj je stabilní" ? "Dlouhodobě stabilní" : recommendationTrend.label}</div></div>
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">POSLEDNÍ ZMĚNA</div><div className={`mt-1 text-lg font-black ${latestNdviChangeClass}`}>{latestNdviChangeLabel}</div><div className="mt-1 text-[8px] text-slate-600">oproti předchozímu měření</div></div>
@@ -1201,7 +1201,7 @@ setAreaError("");
   )}
 </label>
              
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
   <label className="block text-[9px] text-slate-500">
     Plocha (ha)
     <input
@@ -1237,7 +1237,7 @@ setAreaError("");
     </select>
   </label>
 </div>
-              <div className="grid grid-cols-2 gap-2"><label className="block text-[9px] text-slate-500">Datum setí / výsadby<input type="date" value={sowingDate} onChange={(event) => setSowingDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label><label className="block text-[9px] text-slate-500">Předpokládaná sklizeň<input type="date" value={expectedHarvestDate} onChange={(event) => setExpectedHarvestDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2"><label className="block text-[9px] text-slate-500">Datum setí / výsadby<input type="date" value={sowingDate} onChange={(event) => setSowingDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label><label className="block text-[9px] text-slate-500">Předpokládaná sklizeň<input type="date" value={expectedHarvestDate} onChange={(event) => setExpectedHarvestDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label></div>
               <label className="block text-[9px] text-slate-500">Aktuální růstová fáze<select value={growthStage} onChange={(event) => setGrowthStage(event.target.value)} disabled={!cropName} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white disabled:opacity-50"><option value="">Vyberte růstovou fázi</option>{growthStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></label>
               <button type="button" onClick={saveCropData} disabled={savingCrop} className="w-full rounded-lg bg-cyan-500 py-2.5 text-xs font-black text-slate-950 hover:bg-cyan-400 disabled:opacity-50">{savingCrop ? "Ukládám..." : "💾 Uložit údaje o plodině"}</button>
             </div>
