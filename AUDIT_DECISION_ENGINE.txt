@@ -1,0 +1,1959 @@
+﻿/**
+ * AEGRIS Decision Engine
+ *
+ * Centralized project-context evaluation.
+ * This file intentionally contains the existing AEGRIS evaluation logic
+ * moved out of the page component so it can be reused and extended.
+ */
+
+export type NdviHistory = {
+  id: number;
+  project_id: number;
+  period_from: string;
+  period_to: string;
+  ndvi: number;
+  created_at: string;
+};
+
+export type CropProfile = {
+  id: number;
+  name: string;
+  category: string | null;
+  min_temperature_c: number | null;
+  max_temperature_c: number | null;
+  soil_moisture_min_pct: number | null;
+  soil_moisture_max_pct: number | null;
+  ph_min: number | null;
+  ph_max: number | null;
+  water_need: string | null;
+  light_need: string | null;
+  notes: string | null;
+};
+
+export type CropStageProfile = {
+  id: number;
+  crop_profile_id: number;
+  growth_stage: string;
+  kc: number | null;
+  min_temperature_c: number | null;
+  max_temperature_c: number | null;
+  water_stress_sensitivity: string | null;
+};
+
+export type ProjectSoilProfile = {
+  project_id: number;
+  soil_texture: string | null;
+  field_capacity_pct: number | null;
+  wilting_point_pct: number | null;
+  root_zone_depth_cm: number | null;
+  reference_depth_top_cm: number;
+  reference_depth_bottom_cm: number;
+  data_source: string;
+  confidence: string;
+  notes: string | null;
+};
+
+export type WeatherData = {
+  temperature_c: number | null;
+  humidity_pct: number | null;
+  precipitation_mm: number | null;
+  wind_speed_kmh: number | null;
+  soil_moisture_pct: number | null;
+  precipitation_probability_pct: number | null;
+  next24h_precipitation_mm: number | null;
+  next24h_min_temperature_c: number | null;
+  next24h_max_temperature_c: number | null;
+  evapotranspiration_mm: number | null;
+  fetched_at: string;
+};
+
+export type NdviTrend = {
+  direction: "RostoucĂ­" | "KlesajĂ­cĂ­" | "StabilnĂ­" | "Nedostatek dat";
+  slope: number | null;
+  overallDelta: number | null;
+  overallRelativeChangePct: number | null;
+  latestChange: number | null;
+  previousNdvi: number | null;
+  points: number;
+};
+
+export type ScoreBreakdownItem = {
+  label: string;
+  score: number;
+  weight: number;
+  contribution: number;
+};
+
+export type ContextEvaluation = {
+  level: "OptimĂˇlnĂ­" | "UpozornÄ›nĂ­" | "KritickĂ©" | "Bez vyhodnocenĂ­";
+  priority: "NĂ­zkĂˇ" | "StĹ™ednĂ­" | "VysokĂˇ" | "KritickĂˇ";
+  score: number;
+  scoreLevel:
+    | "Velmi dobrĂ˝ stav"
+    | "DobrĂ˝ stav"
+    | "ZvĂ˝ĹˇenĂ© riziko"
+    | "VysokĂ© riziko"
+    | "KritickĂ˝ stav";
+  trend: NdviTrend;
+  scoreBreakdown: ScoreBreakdownItem[];
+  criticalFactorCount: number;
+  warningFactorCount: number;
+  evaluatedFactorCount: number;
+  dataCompletenessPct: number;
+  summary: string;
+  recommendation: string;
+  actions: string[];
+  factors: Array<{
+    label: string;
+    status: "OK" | "UpozornÄ›nĂ­" | "KritickĂ©" | "N/A";
+    detail: string;
+  }>;
+};
+
+function ndviHistoryTime(item: NdviHistory): number {
+  const value = Date.parse(
+    item.period_from || item.period_to || item.created_at
+  );
+
+  return Number.isFinite(value) ? value : NaN;
+}
+
+/**
+ * JedinĂ˝ kanonickĂ˝ zdroj NDVI ÄŤasovĂ© Ĺ™ady pro engine i dashboard.
+ * HistorickĂ© body po aktuĂˇlnĂ­ analĂ˝ze se ignorujĂ­ a aktuĂˇlnĂ­ analĂ˝za
+ * se pĹ™idĂˇ jako poslednĂ­ bod pouze jednou.
+ */
+export function buildCanonicalNdviHistory(
+  ndviHistory: NdviHistory[],
+  currentNdvi: number | null,
+  analysisCreatedAt: string | null = null
+): NdviHistory[] {
+  const analysisTime = analysisCreatedAt
+    ? Date.parse(analysisCreatedAt)
+    : NaN;
+
+  const valid = ndviHistory
+    .filter(
+      (item) =>
+        Number.isFinite(Number(item.ndvi)) &&
+        Number.isFinite(ndviHistoryTime(item))
+    )
+    .filter(
+      (item) =>
+        !Number.isFinite(analysisTime) ||
+        ndviHistoryTime(item) <= analysisTime
+    )
+    .sort(
+      (a, b) =>
+        ndviHistoryTime(a) - ndviHistoryTime(b)
+    );
+
+  const deduped: NdviHistory[] = [];
+
+  for (const item of valid) {
+    const previous = deduped[deduped.length - 1];
+
+    if (
+      previous &&
+      Math.abs(
+        ndviHistoryTime(previous) -
+          ndviHistoryTime(item)
+      ) < 1000
+    ) {
+      deduped[deduped.length - 1] = item;
+    } else {
+      deduped.push(item);
+    }
+  }
+
+  if (
+    currentNdvi == null ||
+    !Number.isFinite(currentNdvi)
+  ) {
+    return deduped;
+  }
+
+  const currentTime = Number.isFinite(analysisTime)
+    ? analysisTime
+    : Date.now();
+
+  const currentIso = new Date(currentTime).toISOString();
+  const last = deduped[deduped.length - 1];
+
+  if (
+    last &&
+    Math.abs(
+      ndviHistoryTime(last) - currentTime
+    ) < 1000 &&
+    Math.abs(Number(last.ndvi) - currentNdvi) < 0.0005
+  ) {
+    return deduped;
+  }
+
+  return [
+    ...deduped,
+    {
+      id: -1,
+      project_id: deduped[0]?.project_id ?? 0,
+      period_from: currentIso,
+      period_to: currentIso,
+      ndvi: currentNdvi,
+      created_at: currentIso,
+    },
+  ];
+}
+
+export function calculateNdviTrend(
+  ndviHistory: NdviHistory[],
+  currentNdvi: number | null,
+  analysisCreatedAt: string | null = null
+): NdviTrend {
+  if (
+    currentNdvi == null ||
+    !Number.isFinite(currentNdvi)
+  ) {
+    return {
+      direction: "Nedostatek dat",
+      slope: null,
+      overallDelta: null,
+      overallRelativeChangePct: null,
+      latestChange: null,
+      previousNdvi: null,
+      points: 0,
+    };
+  }
+
+  const canonical = buildCanonicalNdviHistory(
+    ndviHistory,
+    currentNdvi,
+    analysisCreatedAt
+  );
+
+  const historical = canonical.filter(
+    (item) => !(item.id === -1)
+  );
+
+  const previousNdvi = historical.length
+    ? Number(historical[historical.length - 1].ndvi)
+    : null;
+
+  const values = historical
+    .slice(-5)
+    .map((item) => Number(item.ndvi))
+    .concat(currentNdvi);
+
+  if (values.length < 2) {
+    return {
+      direction: "Nedostatek dat",
+      slope: null,
+      overallDelta: null,
+      overallRelativeChangePct: null,
+      latestChange:
+        previousNdvi == null
+          ? null
+          : currentNdvi - previousNdvi,
+      previousNdvi,
+      points: values.length,
+    };
+  }
+
+  const n = values.length;
+  const xMean = (n - 1) / 2;
+
+  const yMean =
+    values.reduce(
+      (sum, value) => sum + value,
+      0
+    ) / n;
+
+  let numerator = 0;
+  let denominator = 0;
+
+  values.forEach((value, index) => {
+    const xDelta = index - xMean;
+
+    numerator +=
+      xDelta * (value - yMean);
+
+    denominator +=
+      xDelta * xDelta;
+  });
+
+  const slope =
+    denominator > 0
+      ? numerator / denominator
+      : 0;
+
+  const first = values[0];
+
+  const overallDelta =
+    currentNdvi - first;
+
+  const overallRelativeChangePct =
+    Math.abs(first) > 0
+      ? (overallDelta / Math.abs(first)) * 100
+      : 0;
+
+  const latestChange =
+    previousNdvi == null
+      ? null
+      : currentNdvi - previousNdvi;
+
+  const direction =
+    slope <= -0.015 ||
+    overallRelativeChangePct <= -10
+      ? "KlesajĂ­cĂ­"
+      : slope >= 0.015 ||
+          overallRelativeChangePct >= 10
+        ? "RostoucĂ­"
+        : "StabilnĂ­";
+
+  return {
+    direction,
+    slope,
+    overallDelta,
+    overallRelativeChangePct,
+    latestChange,
+    previousNdvi,
+    points: values.length,
+  };
+}
+
+export function evaluateProjectContext(
+  ndvi: number | null,
+  cropProfile: CropProfile | null,
+  cropStageProfile: CropStageProfile | null,
+  growthStage: string,
+  weather: WeatherData | null,
+  ndviHistory: NdviHistory[] = [],
+  analysisCreatedAt: string | null = null,
+  soilProfile: ProjectSoilProfile | null = null
+): ContextEvaluation {
+  if (
+    ndvi == null ||
+    !Number.isFinite(ndvi)
+  ) {
+    return {
+      level: "Bez vyhodnocenĂ­",
+      priority: "NĂ­zkĂˇ",
+      score: 0,
+      scoreLevel: "KritickĂ˝ stav",
+      trend: {
+        direction: "Nedostatek dat",
+        slope: null,
+        overallDelta: null,
+        overallRelativeChangePct: null,
+        latestChange: null,
+        previousNdvi: null,
+        points: 0,
+      },
+      scoreBreakdown: [],
+      criticalFactorCount: 0,
+      warningFactorCount: 0,
+      evaluatedFactorCount: 0,
+      dataCompletenessPct: 0,
+      summary:
+        "ZatĂ­m nenĂ­ k dispozici platnĂˇ NDVI analĂ˝za.",
+      recommendation:
+        "SpusĹĄte AI analĂ˝zu projektu. Po jejĂ­m dokonÄŤenĂ­ AEGRIS doplnĂ­ kontext poÄŤasĂ­, poĹľadavkĹŻ plodiny a vĂ˝voje porostu.",
+      actions: [
+        "Spustit aktuĂˇlnĂ­ AI analĂ˝zu projektu.",
+        "Zkontrolovat, Ĺľe je vybranĂˇ plodina a rĹŻstovĂˇ fĂˇze.",
+      ],
+      factors: [
+        {
+          label: "NDVI",
+          status: "N/A",
+          detail:
+            "ChybĂ­ aktuĂˇlnĂ­ analĂ˝za.",
+        },
+        {
+          label: "PoÄŤasĂ­",
+          status: weather
+            ? "OK"
+            : "N/A",
+          detail: weather
+            ? "AktuĂˇlnĂ­ poÄŤasĂ­ je naÄŤtenĂ©."
+            : "PoÄŤasĂ­ nenĂ­ k dispozici.",
+        },
+      ],
+    };
+  }
+
+  const stageTarget: Record<string, number> = {
+    "VzchĂˇzenĂ­": 0.20,
+    "KlĂ­ÄŤenĂ­ a vzchĂˇzenĂ­": 0.20,
+    "ListovĂˇ rĹŻĹľice": 0.30,
+    "VegetativnĂ­ rĹŻst": 0.45,
+    "OdnoĹľovĂˇnĂ­": 0.35,
+    "SloupkovĂˇnĂ­": 0.45,
+    "ProdluĹľovacĂ­ rĹŻst": 0.45,
+    "KvetenĂ­ / opylenĂ­": 0.55,
+    "KvetenĂ­": 0.55,
+    "MetĂˇnĂ­ a kvetenĂ­": 0.55,
+    "Tvorba zrna": 0.55,
+    "Tvorba ĹˇeĹˇulĂ­": 0.55,
+    "Tvorba hlĂ­z": 0.45,
+    "RĹŻst hlĂ­z": 0.55,
+    "DozrĂˇvĂˇnĂ­": 0.50,
+    "Zralost": 0.32,
+  };
+
+  const target =
+    stageTarget[growthStage] ?? 0.40;
+
+  const stageKc =
+    cropStageProfile?.kc != null &&
+    Number.isFinite(
+      Number(cropStageProfile.kc)
+    )
+      ? Number(cropStageProfile.kc)
+      : null;
+
+  const stageMinTemperature =
+    cropStageProfile?.min_temperature_c != null
+      ? Number(
+          cropStageProfile.min_temperature_c
+        )
+      : cropProfile?.min_temperature_c ??
+        null;
+
+  const stageMaxTemperature =
+    cropStageProfile?.max_temperature_c != null
+      ? Number(
+          cropStageProfile.max_temperature_c
+        )
+      : cropProfile?.max_temperature_c ??
+        null;
+
+  const waterStressSensitivity =
+    cropStageProfile?.water_stress_sensitivity?.toLowerCase() ??
+    cropProfile?.water_need?.toLowerCase() ??
+    "";
+
+  const sensitivityKey =
+    waterStressSensitivity.includes(
+      "velmi vysok"
+    )
+      ? "velmi-vysoka"
+      : waterStressSensitivity.includes(
+          "vysok"
+        )
+        ? "vysoka"
+        : waterStressSensitivity.includes(
+            "nĂ­zk"
+          )
+          ? "nĂ­zka"
+          : "stĹ™ednĂ­";
+
+  const sensitivityFactor =
+    sensitivityKey === "velmi-vysoka"
+      ? 1.5
+      : sensitivityKey === "vysoka"
+        ? 1.25
+        : sensitivityKey === "nĂ­zka"
+          ? 0.75
+          : 1;
+
+  const factors: ContextEvaluation["factors"] =
+    [];
+
+  let criticalCount = 0;
+  let warningCount = 0;
+  let evaluatedCount = 0;
+
+  const actions: string[] = [];
+
+  const clampScore = (value: number) =>
+    Math.max(
+      0,
+      Math.min(100, value)
+    );
+
+  // ---------------------------------------------------------
+  // 1. NDVI / rĹŻstovĂˇ fĂˇze
+  // ---------------------------------------------------------
+  if (ndvi < 0.20) {
+    criticalCount++;
+    evaluatedCount++;
+
+    factors.push({
+      label: "NDVI",
+      status: "KritickĂ©",
+      detail:
+        `${ndvi.toFixed(3)} je velmi nĂ­zkĂ© pro aktuĂˇlnÄ› sledovanĂ˝ porost.`,
+    });
+  } else if (ndvi < target * 0.80) {
+    warningCount++;
+    evaluatedCount++;
+
+    factors.push({
+      label: "NDVI",
+      status: "UpozornÄ›nĂ­",
+      detail:
+        `${ndvi.toFixed(3)} je pod orientaÄŤnĂ­ ĂşrovnĂ­ ${target.toFixed(2)} pro fĂˇzi ${growthStage || "projektu"}.`,
+    });
+
+    actions.push(
+      `Zkontrolovat stav porostu, protoĹľe NDVI ${ndvi.toFixed(3)} je pod orientaÄŤnĂ­ ĂşrovnĂ­ pro fĂˇzi ${growthStage || "projektu"}.`
+    );
+  } else {
+    evaluatedCount++;
+
+    factors.push({
+      label: "NDVI",
+      status: "OK",
+      detail:
+        `${ndvi.toFixed(3)} odpovĂ­dĂˇ orientaÄŤnĂ­ Ăşrovni pro fĂˇzi ${growthStage || "projektu"}.`,
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 2. NDVI trend
+  // ---------------------------------------------------------
+  const canonicalNdviHistory =
+    buildCanonicalNdviHistory(
+      ndviHistory,
+      ndvi,
+      analysisCreatedAt
+    );
+
+  const historicalNdvi =
+    canonicalNdviHistory.filter(
+      (item) => item.id !== -1
+    );
+
+  const trendHistory =
+    historicalNdvi.slice(-5);
+
+  const ndviTrend =
+    calculateNdviTrend(
+      ndviHistory,
+      ndvi,
+      analysisCreatedAt
+    );
+
+  const previousNdvi =
+    ndviTrend.previousNdvi ??
+    undefined;
+
+  if (trendHistory.length >= 2) {
+    evaluatedCount++;
+
+    const slope =
+      ndviTrend.slope ?? 0;
+
+    const overallDelta =
+      ndviTrend.overallDelta ?? 0;
+
+    const overallRelativeChange =
+      ndviTrend.overallRelativeChangePct ??
+      0;
+
+    const criticalTrend =
+      slope <= -0.03 ||
+      overallRelativeChange <= -20;
+
+    const warningTrend =
+      slope <= -0.015 ||
+      overallRelativeChange <= -10;
+
+    if (criticalTrend) {
+      criticalCount++;
+
+      factors.push({
+        label: "Trend NDVI",
+        status: "KritickĂ©",
+        detail:
+          `NDVI mĂˇ za poslednĂ­ch ${ndviTrend.points} mÄ›Ĺ™enĂ­ vĂ˝raznÄ› klesajĂ­cĂ­ trend. LineĂˇrnĂ­ sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/mÄ›Ĺ™enĂ­ a celkovĂˇ zmÄ›na ÄŤinĂ­ ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+      });
+
+      actions.push(
+        "ProvÄ›Ĺ™it pĹ™Ă­ÄŤinu dlouhodobÄ›jĹˇĂ­ho poklesu vegetaÄŤnĂ­ho indexu a porovnat jej s vodnĂ­m, teplotnĂ­m a pĹŻdnĂ­m stavem."
+      );
+    } else if (warningTrend) {
+      warningCount++;
+
+      factors.push({
+        label: "Trend NDVI",
+        status: "UpozornÄ›nĂ­",
+        detail:
+          `NDVI mĂˇ za poslednĂ­ch ${ndviTrend.points} mÄ›Ĺ™enĂ­ klesajĂ­cĂ­ trend. LineĂˇrnĂ­ sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/mÄ›Ĺ™enĂ­ a celkovĂˇ zmÄ›na ÄŤinĂ­ ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+      });
+
+      actions.push(
+        "Sledovat dalĹˇĂ­ NDVI mÄ›Ĺ™enĂ­ a ovÄ›Ĺ™it, zda pokles pokraÄŤuje i v nĂˇsledujĂ­cĂ­ analĂ˝ze."
+      );
+    } else {
+      factors.push({
+        label: "Trend NDVI",
+        status: "OK",
+        detail:
+          `NDVI mĂˇ za poslednĂ­ch ${ndviTrend.points} mÄ›Ĺ™enĂ­ ${ndviTrend.direction.toLowerCase()} trend. LineĂˇrnĂ­ sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/mÄ›Ĺ™enĂ­ a celkovĂˇ zmÄ›na ÄŤinĂ­ ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+      });
+    }
+  } else if (
+    previousNdvi != null &&
+    Number.isFinite(previousNdvi)
+  ) {
+    evaluatedCount++;
+
+    const delta =
+      ndviTrend.latestChange ?? 0;
+
+    const relativeChange =
+      Math.abs(previousNdvi) > 0
+        ? (delta /
+            Math.abs(previousNdvi)) *
+          100
+        : 0;
+
+    const isCritical =
+      delta <= -0.15 ||
+      relativeChange <= -25;
+
+    const isWarning =
+      delta <= -0.08 ||
+      relativeChange <= -15;
+
+    if (isCritical || isWarning) {
+      if (isCritical) {
+        criticalCount++;
+      } else {
+        warningCount++;
+      }
+
+      factors.push({
+        label: "Trend NDVI",
+        status: isCritical
+          ? "KritickĂ©"
+          : "UpozornÄ›nĂ­",
+        detail:
+          `NDVI se oproti pĹ™edchozĂ­mu mÄ›Ĺ™enĂ­ zmÄ›nilo z ${previousNdvi.toFixed(3)} na ${ndvi.toFixed(3)} (${delta >= 0 ? "+" : ""}${delta.toFixed(3)}, ${relativeChange >= 0 ? "+" : ""}${relativeChange.toFixed(1)} %).`,
+      });
+
+      actions.push(
+        "ProvÄ›Ĺ™it pĹ™Ă­ÄŤinu zmÄ›ny vegetaÄŤnĂ­ho indexu a porovnat aktuĂˇlnĂ­ stav s pĹ™edchozĂ­m mÄ›Ĺ™enĂ­m."
+      );
+    } else {
+      factors.push({
+        label: "Trend NDVI",
+        status: "OK",
+        detail:
+          `NDVI je oproti pĹ™edchozĂ­mu mÄ›Ĺ™enĂ­ relativnÄ› stabilnĂ­ (${delta >= 0 ? "+" : ""}${delta.toFixed(3)}).`,
+      });
+    }
+  } else {
+    factors.push({
+      label: "Trend NDVI",
+      status: "N/A",
+      detail:
+        "Pro vyhodnocenĂ­ trendu nenĂ­ k dispozici dostatek historickĂ˝ch NDVI mÄ›Ĺ™enĂ­.",
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 3. AktuĂˇlnĂ­ teplota + 24h teplotnĂ­ vĂ˝hled
+  // ---------------------------------------------------------
+  if (
+    weather?.temperature_c != null &&
+    stageMinTemperature != null &&
+    stageMaxTemperature != null
+  ) {
+    evaluatedCount++;
+
+    const temperature =
+      weather.temperature_c;
+
+    const min =
+      stageMinTemperature;
+
+    const max =
+      stageMaxTemperature;
+
+    if (
+      temperature < min - 3 ||
+      temperature > max + 3
+    ) {
+      criticalCount++;
+
+      factors.push({
+        label: "Teplota",
+        status: "KritickĂ©",
+        detail:
+          `${temperature.toFixed(1)} Â°C je vĂ˝raznÄ› mimo profil ${min}â€“${max} Â°C.`,
+      });
+    } else if (
+      temperature < min ||
+      temperature > max
+    ) {
+      warningCount++;
+
+      factors.push({
+        label: "Teplota",
+        status: "UpozornÄ›nĂ­",
+        detail:
+          `${temperature.toFixed(1)} Â°C je mimo orientaÄŤnĂ­ rozsah ${min}â€“${max} Â°C.`,
+      });
+    } else {
+      factors.push({
+        label: "Teplota",
+        status: "OK",
+        detail:
+          `${temperature.toFixed(1)} Â°C je v orientaÄŤnĂ­m rozsahu ${min}â€“${max} Â°C.`,
+      });
+    }
+  } else if (
+    weather?.temperature_c != null
+  ) {
+    factors.push({
+      label: "Teplota",
+      status: "N/A",
+      detail:
+        `${weather.temperature_c.toFixed(1)} Â°C. Pro porovnĂˇnĂ­ chybĂ­ kompletnĂ­ profil plodiny.`,
+    });
+  } else {
+    factors.push({
+      label: "Teplota",
+      status: "N/A",
+      detail:
+        "AktuĂˇlnĂ­ teplota nenĂ­ k dispozici.",
+    });
+  }
+
+  if (
+    weather?.next24h_min_temperature_c != null &&
+    weather?.next24h_max_temperature_c != null &&
+    stageMinTemperature != null &&
+    stageMaxTemperature != null
+  ) {
+    evaluatedCount++;
+
+    const forecastMin =
+      weather.next24h_min_temperature_c;
+
+    const forecastMax =
+      weather.next24h_max_temperature_c;
+
+    const min =
+      stageMinTemperature;
+
+    const max =
+      stageMaxTemperature;
+
+    if (
+      forecastMin < min - 3 ||
+      forecastMax > max + 3
+    ) {
+      warningCount++;
+
+      factors.push({
+        label:
+          "TeplotnĂ­ vĂ˝hled 24 h",
+        status: "UpozornÄ›nĂ­",
+        detail:
+          `PĹ™edpovÄ›ÄŹ pro dalĹˇĂ­ch 24 h je ${forecastMin.toFixed(1)} aĹľ ${forecastMax.toFixed(1)} Â°C, coĹľ je vĂ˝raznÄ› mimo profil plodiny. Jde o pĹ™edpoklĂˇdanĂ© riziko, nikoli automaticky o potvrzenĂ˝ teplotnĂ­ stres.`,
+      });
+
+      actions.push(
+        "Sledovat teplotnĂ­ vĂ˝voj v dalĹˇĂ­ch 24 hodinĂˇch a ovÄ›Ĺ™it riziko teplotnĂ­ho stresu v terĂ©nu."
+      );
+    } else if (
+      forecastMin < min ||
+      forecastMax > max
+    ) {
+      warningCount++;
+
+      factors.push({
+        label:
+          "TeplotnĂ­ vĂ˝hled 24 h",
+        status: "UpozornÄ›nĂ­",
+        detail:
+          `PĹ™edpovÄ›ÄŹ pro dalĹˇĂ­ch 24 h je ${forecastMin.toFixed(1)} aĹľ ${forecastMax.toFixed(1)} Â°C a zasahuje mimo profil plodiny ${min}â€“${max} Â°C.`,
+      });
+
+      actions.push(
+        "Sledovat teplotnĂ­ vĂ˝voj v dalĹˇĂ­ch 24 hodinĂˇch."
+      );
+    } else {
+      factors.push({
+        label:
+          "TeplotnĂ­ vĂ˝hled 24 h",
+        status: "OK",
+        detail:
+          `PĹ™edpovÄ›ÄŹ pro dalĹˇĂ­ch 24 h je ${forecastMin.toFixed(1)} aĹľ ${forecastMax.toFixed(1)} Â°C a zĹŻstĂˇvĂˇ v profilu plodiny.`,
+      });
+    }
+  } else {
+    factors.push({
+      label:
+        "TeplotnĂ­ vĂ˝hled 24 h",
+      status: "N/A",
+      detail:
+        "24hodinovĂ˝ teplotnĂ­ vĂ˝hled nebo profil plodiny nenĂ­ kompletnÄ› k dispozici.",
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 4. Vlhkost pĹŻdy
+  // ---------------------------------------------------------
+  // PĹŻdnĂ­ vlhkost interpretujeme pouze tehdy, pokud mĂˇme
+  // projektovĂ˝ pĹŻdnĂ­ profil s FC a PWP.
+  // SamotnĂˇ hodnota soil moisture bez pĹŻdnĂ­ho kontextu
+  // nenĂ­ dostateÄŤnĂˇ pro vĂ˝poÄŤet vodnĂ­ho stresu.
+
+  if (
+    weather?.soil_moisture_pct != null &&
+    soilProfile?.field_capacity_pct != null &&
+    soilProfile?.wilting_point_pct != null
+  ) {
+    evaluatedCount++;
+
+    const soil =
+      weather.soil_moisture_pct;
+
+    const fieldCapacity =
+      soilProfile.field_capacity_pct;
+
+    const wiltingPoint =
+      soilProfile.wilting_point_pct;
+
+    const availableWaterRange =
+      fieldCapacity - wiltingPoint;
+
+    if (availableWaterRange <= 0) {
+      factors.push({
+        label: "Vlhkost pĹŻdy",
+        status: "N/A",
+        detail:
+          "PĹŻdnĂ­ profil obsahuje neplatnĂ˝ rozsah mezi field capacity a wilting point.",
+      });
+    } else {
+      const relativeAvailableWater =
+        ((soil - wiltingPoint) /
+          availableWaterRange) *
+        100;
+
+      const waterAvailability =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            relativeAvailableWater
+          )
+        );
+
+      const criticalWaterAvailability =
+        Math.min(
+          100,
+          20 * sensitivityFactor
+        );
+
+      const warningWaterAvailability =
+        Math.min(
+          100,
+          40 * sensitivityFactor
+        );
+
+      if (
+        waterAvailability <=
+        criticalWaterAvailability
+      ) {
+        criticalCount++;
+
+        factors.push({
+          label: "Vlhkost pĹŻdy",
+          status: "KritickĂ©",
+          detail:
+            `PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % odpovĂ­dĂˇ pĹ™ibliĹľnÄ› ${waterAvailability.toFixed(0)} % dostupnĂ© vody mezi wilting point (${wiltingPoint.toFixed(1)} %) a field capacity (${fieldCapacity.toFixed(1)} %). KritickĂˇ hranice pro aktuĂˇlnĂ­ rĹŻstovou fĂˇzi je ${criticalWaterAvailability.toFixed(0)} %.`,
+        });
+
+        actions.push(
+          "ProvÄ›Ĺ™it skuteÄŤnou pĹŻdnĂ­ vlhkost a vodnĂ­ stres porostu v terĂ©nu."
+        );
+      } else if (
+        waterAvailability <=
+        warningWaterAvailability
+      ) {
+        warningCount++;
+
+        factors.push({
+          label: "Vlhkost pĹŻdy",
+          status: "UpozornÄ›nĂ­",
+          detail:
+            `PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % odpovĂ­dĂˇ pĹ™ibliĹľnÄ› ${waterAvailability.toFixed(0)} % dostupnĂ© vody mezi wilting point (${wiltingPoint.toFixed(1)} %) a field capacity (${fieldCapacity.toFixed(1)} %). VarovnĂˇ hranice pro aktuĂˇlnĂ­ rĹŻstovou fĂˇzi je ${warningWaterAvailability.toFixed(0)} %.`,
+        });
+
+        actions.push(
+          "Sledovat pĹŻdnĂ­ vlhkost a vĂ˝voj vodnĂ­ho stresu porostu."
+        );
+      } else {
+        factors.push({
+          label: "Vlhkost pĹŻdy",
+          status: "OK",
+          detail:
+            `PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % odpovĂ­dĂˇ pĹ™ibliĹľnÄ› ${waterAvailability.toFixed(0)} % dostupnĂ© vody mezi wilting point (${wiltingPoint.toFixed(1)} %) a field capacity (${fieldCapacity.toFixed(1)} %).`,
+        });
+      }
+    }
+  } else if (
+    weather?.soil_moisture_pct != null &&
+    cropProfile?.soil_moisture_min_pct != null &&
+    cropProfile?.soil_moisture_max_pct != null
+  ) {
+    evaluatedCount++;
+
+    const soil =
+      weather.soil_moisture_pct;
+
+    const min =
+      cropProfile.soil_moisture_min_pct;
+
+    const max =
+      cropProfile.soil_moisture_max_pct;
+
+    const range =
+      Math.max(max - min, 1);
+
+    if (
+      soil < min ||
+      soil > max
+    ) {
+      const outsideDistance =
+        soil < min
+          ? min - soil
+          : soil - max;
+
+      const score = Math.max(
+        0,
+        Math.min(
+          100,
+          70 -
+            (outsideDistance / range) *
+              70
+        )
+      );
+
+      const criticalSoilScore =
+        Math.min(
+          100,
+          25 * sensitivityFactor
+        );
+
+      const warningSoilScore =
+        Math.min(
+          100,
+          50 * sensitivityFactor
+        );
+
+      if (
+        score <= criticalSoilScore
+      ) {
+        criticalCount++;
+
+        factors.push({
+          label: "Vlhkost pĹŻdy",
+          status: "KritickĂ©",
+          detail:
+            `AktuĂˇlnĂ­ pĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je mimo doporuÄŤenĂ˝ rozsah ${min.toFixed(1)}â€“${max.toFixed(1)} %. HodnocenĂ­ je orientaÄŤnĂ­, protoĹľe projektovĂ˝ pĹŻdnĂ­ profil s field capacity a wilting point nenĂ­ k dispozici.`,
+        });
+
+        actions.push(
+          "ProvÄ›Ĺ™it skuteÄŤnou pĹŻdnĂ­ vlhkost a vodnĂ­ stres porostu v terĂ©nu."
+        );
+      } else if (
+        score <= warningSoilScore
+      ) {
+        warningCount++;
+
+        factors.push({
+          label: "Vlhkost pĹŻdy",
+          status: "UpozornÄ›nĂ­",
+          detail:
+            `AktuĂˇlnĂ­ pĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je mimo doporuÄŤenĂ˝ rozsah ${min.toFixed(1)}â€“${max.toFixed(1)} %. HodnocenĂ­ je orientaÄŤnĂ­, protoĹľe projektovĂ˝ pĹŻdnĂ­ profil s field capacity a wilting point nenĂ­ k dispozici.`,
+        });
+
+        actions.push(
+          "Sledovat pĹŻdnĂ­ vlhkost a vĂ˝voj vodnĂ­ho stresu porostu."
+        );
+      }
+    } else {
+      factors.push({
+        label: "Vlhkost pĹŻdy",
+        status: "OK",
+        detail:
+          `AktuĂˇlnĂ­ pĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je v doporuÄŤenĂ©m rozsahu ${min.toFixed(1)}â€“${max.toFixed(1)} %. HodnocenĂ­ je orientaÄŤnĂ­, protoĹľe projektovĂ˝ pĹŻdnĂ­ profil s field capacity a wilting point nenĂ­ k dispozici.`,
+      });
+    }
+  } else {
+    factors.push({
+      label: "Vlhkost pĹŻdy",
+      status: "N/A",
+      detail:
+        "MÄ›Ĺ™enĂˇ vlhkost pĹŻdy nenĂ­ k dispozici.",
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 5. VodnĂ­ bilance: srĂˇĹľky + evapotranspirace + Kc rĹŻstovĂ© fĂˇze
+  // ---------------------------------------------------------
+  //
+  // DĹ®LEĹ˝ITĂ‰:
+  // Stav faktoru "VodnĂ­ bilance" i jeho kontinuĂˇlnĂ­ score vychĂˇzejĂ­
+  // z JEDNOHO vĂ˝poÄŤtu. NesmĂ­ zde vzniknout druhĂˇ nezĂˇvislĂˇ logika,
+  // kterĂˇ by mohla vracet jinĂ˝ stav neĹľ scoreBreakdown.
+  //
+  // 100 = bez deficitu
+  // 60â€“99 = OK
+  // 30â€“59 = UpozornÄ›nĂ­
+  // 0â€“29 = KritickĂ©
+  //
+  // KritickĂˇ hranice deficitu je 30 % dennĂ­ ETc,
+  // upravenĂˇ podle citlivosti plodiny/fĂˇze.
+
+  let continuousWaterBalanceScore:
+    number | null = null;
+
+  const precipitation24h =
+    weather?.next24h_precipitation_mm;
+
+  const evapotranspiration =
+    weather?.evapotranspiration_mm;
+
+  const cropCoefficient =
+    stageKc ?? 1;
+
+  if (precipitation24h != null) {
+    const precip =
+      Number(precipitation24h);
+
+    const et0 =
+      evapotranspiration != null
+        ? Number(evapotranspiration)
+        : null;
+
+    evaluatedCount++;
+
+    if (
+      Number.isFinite(precip) &&
+      et0 != null &&
+      Number.isFinite(et0)
+    ) {
+      const cropEt =
+        Math.max(
+          0,
+          et0 * cropCoefficient
+        );
+
+      const waterDeficit =
+        Math.max(
+          0,
+          cropEt - precip
+        );
+
+      // VodnĂ­ bilance je ĹˇkĂˇlovĂˇna vĹŻÄŤi kritickĂ©mu podĂ­lu
+      // dennĂ­ potĹ™eby vody. 0 % deficitu = 100 bodĹŻ;
+      // dosaĹľenĂ­ kritickĂ©ho deficitu = 0 bodĹŻ.
+      //
+      // Citlivost plodiny/fĂˇze posouvĂˇ kritickou hranici:
+      // citlivÄ›jĹˇĂ­ porost dosĂˇhne 0 bodĹŻ pĹ™i menĹˇĂ­m deficitu,
+      // mĂ©nÄ› citlivĂ˝ porost pĹ™i vÄ›tĹˇĂ­m deficitu.
+      const criticalDeficitRatio =
+        0.30 /
+        Math.max(
+          sensitivityFactor,
+          0.01
+        );
+
+      continuousWaterBalanceScore =
+        cropEt > 0
+          ? clampScore(
+              100 -
+                (waterDeficit /
+                  cropEt /
+                  Math.max(
+                    criticalDeficitRatio,
+                    0.01
+                  )) *
+                  100
+            )
+          : 100;
+
+      // PĹŻdnĂ­ vlhkost se do vodnĂ­ bilance NEPĹIÄŚĂŤTĂ znovu.
+      // Je samostatnĂ˝m kanonickĂ˝m faktorem s vlastnĂ­ vahou 15 %.
+      // TĂ­m se zabrĂˇnĂ­ dvojĂ­mu zapoÄŤtenĂ­ stejnĂ©ho pĹŻdnĂ­ho signĂˇlu.
+
+      const waterStatus =
+        continuousWaterBalanceScore < 30
+          ? "KritickĂ©"
+          : continuousWaterBalanceScore < 60
+            ? "UpozornÄ›nĂ­"
+            : "OK";
+
+      if (
+        waterStatus ===
+        "KritickĂ©"
+      ) {
+        criticalCount++;
+
+        let detail =
+          `Pro fĂˇzi ${growthStage || "neuvedenou"} je Kc ${cropCoefficient.toFixed(2)}. ` +
+          `ETâ‚€ ${et0.toFixed(1)} mm/den odpovĂ­dĂˇ orientaÄŤnĂ­ ETc ${cropEt.toFixed(1)} mm/den; ` +
+          `oÄŤekĂˇvanĂ© srĂˇĹľky jsou ${precip.toFixed(1)} mm. ` +
+          `Deficit ÄŤinĂ­ ${waterDeficit.toFixed(1)} mm. ` +
+          `KontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`;
+
+        const soil =
+          weather?.soil_moisture_pct;
+
+        const soilMin =
+          cropProfile?.soil_moisture_min_pct;
+
+        const soilMax =
+          cropProfile?.soil_moisture_max_pct;
+
+        if (
+          soil != null &&
+          soilMin != null &&
+          soilMax != null
+        ) {
+          detail +=
+            ` PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je ` +
+            `${
+              soil < soilMin
+                ? "pod"
+                : soil > soilMax
+                  ? "nad"
+                  : "v"
+            } ` +
+            `doporuÄŤenĂ˝m rozsahem ${soilMin.toFixed(1)}â€“${soilMax.toFixed(1)} %.`;
+        }
+
+        if (
+          soil != null &&
+          soilProfile?.wilting_point_pct != null &&
+          soil <=
+            soilProfile.wilting_point_pct
+        ) {
+          detail +=
+            ` SouÄŤasnÄ› je pĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % ` +
+            `na/pod bodem vadnutĂ­ ${soilProfile.wilting_point_pct.toFixed(1)} %.`;
+        }
+
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "KritickĂ©",
+          detail,
+        });
+
+        actions.push(
+          "ProvÄ›Ĺ™it vodnĂ­ reĹľim porostu a skuteÄŤnou pĹŻdnĂ­ vlhkost; kontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je v kritickĂ©m pĂˇsmu."
+        );
+      } else if (
+        waterStatus ===
+        "UpozornÄ›nĂ­"
+      ) {
+        warningCount++;
+
+        let detail =
+          `Pro fĂˇzi ${growthStage || "neuvedenou"} je Kc ${cropCoefficient.toFixed(2)}. ` +
+          `ETâ‚€ ${et0.toFixed(1)} mm/den odpovĂ­dĂˇ orientaÄŤnĂ­ ETc ${cropEt.toFixed(1)} mm/den; ` +
+          `oÄŤekĂˇvanĂ© srĂˇĹľky jsou ${precip.toFixed(1)} mm. ` +
+          `OrientaÄŤnĂ­ deficit ÄŤinĂ­ ${waterDeficit.toFixed(1)} mm. ` +
+          `KontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`;
+
+        const soil =
+          weather?.soil_moisture_pct;
+
+        const soilMin =
+          cropProfile?.soil_moisture_min_pct;
+
+        const soilMax =
+          cropProfile?.soil_moisture_max_pct;
+
+        if (
+          soil != null &&
+          soilMin != null &&
+          soilMax != null
+        ) {
+          if (
+            soil < soilMin
+          ) {
+            detail +=
+              ` PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je pod doporuÄŤenĂ˝m minimem ${soilMin.toFixed(1)} %.`;
+          } else if (
+            soil <= soilMax
+          ) {
+            detail +=
+              ` PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je zatĂ­m v doporuÄŤenĂ©m rozsahu ${soilMin.toFixed(1)}â€“${soilMax.toFixed(1)} %.`;
+          } else {
+            detail +=
+              ` PĹŻdnĂ­ vlhkost ${soil.toFixed(1)} % je nad doporuÄŤenĂ˝m maximem ${soilMax.toFixed(1)} %.`;
+          }
+        } else {
+          detail +=
+            " AktuĂˇlnĂ­ pĹŻdnĂ­ vlhkost nelze porovnat s doporuÄŤenĂ˝m rozsahem.";
+        }
+
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "UpozornÄ›nĂ­",
+          detail,
+        });
+
+        actions.push(
+          "Sledovat vodnĂ­ reĹľim porostu; kontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ve varovnĂ©m pĂˇsmu."
+        );
+      } else {
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "OK",
+          detail:
+            `RĹŻstovĂˇ fĂˇze ${growthStage || "neuvedenĂˇ"} mĂˇ Kc ${cropCoefficient.toFixed(2)}. ` +
+            `ETâ‚€ ${et0.toFixed(1)} mm/den, orientaÄŤnĂ­ ETc ${cropEt.toFixed(1)} mm/den, ` +
+            `oÄŤekĂˇvanĂ© srĂˇĹľky ${precip.toFixed(1)} mm a kontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance ` +
+            `${continuousWaterBalanceScore.toFixed(1)} bodu.`,
+        });
+      }
+    } else if (
+      Number.isFinite(precip)
+    ) {
+      // Fallback pĹ™i absenci ETâ‚€.
+      // I zde pouĹľĂ­vĂˇme stejnĂ© hranice stavu jako u plnĂ©ho vĂ˝poÄŤtu,
+      // aby faktor a score nikdy nebyly ve vzĂˇjemnĂ©m rozporu.
+      continuousWaterBalanceScore =
+        clampScore(
+          precip >= 5
+            ? 100
+            : precip >= 1
+              ? 70 +
+                ((precip - 1) /
+                  4) *
+                  30
+              : precip * 70
+        );
+
+      const waterStatus =
+        continuousWaterBalanceScore < 30
+          ? "KritickĂ©"
+          : continuousWaterBalanceScore < 60
+            ? "UpozornÄ›nĂ­"
+            : "OK";
+
+      if (
+        waterStatus ===
+        "KritickĂ©"
+      ) {
+        criticalCount++;
+
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "KritickĂ©",
+          detail:
+            `Za 24 h se oÄŤekĂˇvĂˇ pouze ${precip.toFixed(1)} mm srĂˇĹľek. ` +
+            `Pro pĹ™esnÄ›jĹˇĂ­ vĂ˝poÄŤet chybĂ­ ETâ‚€; Kc rĹŻstovĂ© fĂˇze je ${cropCoefficient.toFixed(2)}. ` +
+            `KontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`,
+        });
+
+        actions.push(
+          "ProvÄ›Ĺ™it vodnĂ­ reĹľim porostu; oÄŤekĂˇvanĂ© srĂˇĹľky jsou nĂ­zkĂ© a bez ETâ‚€ nelze pĹ™esnÄ› urÄŤit vodnĂ­ deficit."
+        );
+      } else if (
+        waterStatus ===
+        "UpozornÄ›nĂ­"
+      ) {
+        warningCount++;
+
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "UpozornÄ›nĂ­",
+          detail:
+            `Za 24 h se oÄŤekĂˇvĂˇ ${precip.toFixed(1)} mm srĂˇĹľek. ` +
+            `Pro pĹ™esnÄ›jĹˇĂ­ vĂ˝poÄŤet chybĂ­ ETâ‚€; Kc rĹŻstovĂ© fĂˇze je ${cropCoefficient.toFixed(2)}. ` +
+            `KontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`,
+        });
+
+        actions.push(
+          "Sledovat vodnĂ­ reĹľim porostu; pro pĹ™esnÄ›jĹˇĂ­ vĂ˝poÄŤet chybĂ­ ETâ‚€."
+        );
+      } else {
+        factors.push({
+          label: "VodnĂ­ bilance",
+          status: "OK",
+          detail:
+            `OÄŤekĂˇvanĂ© srĂˇĹľky za 24 h: ${precip.toFixed(1)} mm. ` +
+            `Pro pĹ™esnÄ›jĹˇĂ­ vodnĂ­ bilanci chybĂ­ ETâ‚€; Kc rĹŻstovĂ© fĂˇze je ${cropCoefficient.toFixed(2)}. ` +
+            `KontinuĂˇlnĂ­ skĂłre vodnĂ­ bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`,
+        });
+      }
+    }
+  } else {
+    factors.push({
+      label: "VodnĂ­ bilance",
+      status: "N/A",
+      detail:
+        "PĹ™edpovÄ›ÄŹ srĂˇĹľek nenĂ­ k dispozici.",
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 6. PravdÄ›podobnost srĂˇĹľek, pokud ji API poskytne
+  // ---------------------------------------------------------
+  if (
+    weather?.precipitation_probability_pct !=
+    null
+  ) {
+    const probability =
+      weather.precipitation_probability_pct;
+
+    factors.push({
+      label: "PravdÄ›podobnost srĂˇĹľek",
+      status: "OK",
+      detail:
+        `PravdÄ›podobnost srĂˇĹľek je ${probability.toFixed(0)} %.`,
+    });
+  }
+
+  // ---------------------------------------------------------
+  // KombinovanĂ© riziko: souÄŤasnÄ› nĂ­zkĂ© NDVI + vodnĂ­/tepelnĂ˝ stres
+  // ---------------------------------------------------------
+  const hasLowNdvi =
+    ndvi < target * 0.8;
+
+  const hasWaterWarning =
+    factors.some(
+      (factor) =>
+        factor.label ===
+          "VodnĂ­ bilance" &&
+        (
+          factor.status ===
+            "UpozornÄ›nĂ­" ||
+          factor.status ===
+            "KritickĂ©"
+        )
+    );
+
+  const hasCurrentTemperatureWarning =
+    factors.some(
+      (factor) =>
+        factor.label ===
+          "Teplota" &&
+        (
+          factor.status ===
+            "UpozornÄ›nĂ­" ||
+          factor.status ===
+            "KritickĂ©"
+        )
+    );
+
+  const hasForecastTemperatureRisk =
+    factors.some(
+      (factor) =>
+        factor.label ===
+          "TeplotnĂ­ vĂ˝hled 24 h" &&
+        (
+          factor.status ===
+            "UpozornÄ›nĂ­" ||
+          factor.status ===
+            "KritickĂ©"
+        )
+    );
+
+  if (
+    hasLowNdvi &&
+    hasWaterWarning &&
+    hasCurrentTemperatureWarning
+  ) {
+    criticalCount++;
+
+    factors.push({
+      label: "KombinovanĂ© riziko",
+      status: "KritickĂ©",
+      detail:
+        "SouÄŤasnÄ› je zaznamenĂˇna nĂ­zkĂˇ vegetaÄŤnĂ­ aktivita a nepĹ™Ă­znivĂˇ vodnĂ­ i teplotnĂ­ situace. Jde o kombinovanĂ˝ signĂˇl, kterĂ˝ vyĹľaduje terĂ©nnĂ­ ovÄ›Ĺ™enĂ­.",
+    });
+
+    actions.push(
+      "ProvĂ©st prioritnĂ­ terĂ©nnĂ­ kontrolu porostu a ovÄ›Ĺ™it vodnĂ­ a teplotnĂ­ stres pĹ™ed rozhodnutĂ­m o zĂˇsahu."
+    );
+  }
+
+  // ---------------------------------------------------------
+  // AEGRIS SCORE 0â€“100 â€” KANONICKĂť MODEL
+  // ---------------------------------------------------------
+  //
+  // VĂˇhy:
+  // NDVI 25 % | Trend NDVI 20 % | VodnĂ­ bilance 20 %
+  // Teplota 10 % | TeplotnĂ­ vĂ˝hled 10 % | Vlhkost pĹŻdy 15 %
+  // CELKEM 100 %.
+  //
+  // Status faktoru a kontinuĂˇlnĂ­ score jsou oddÄ›lenĂ©.
+  // KombinovanĂ© riziko se do score nepĹ™iÄŤĂ­tĂˇ podruhĂ©.
+  //
+  // VodnĂ­ bilance a pĹŻdnĂ­ vlhkost jsou jiĹľ vypoÄŤtenĂ© vĂ˝Ĺˇe:
+  // zde se pouze pouĹľijĂ­ jejich kanonickĂ© hodnoty.
+  // KaĹľdĂ˝ signĂˇl se do vĂ˝slednĂ©ho score zapoÄŤĂ­tĂˇvĂˇ prĂˇvÄ› jednou.
+
+  const scoreInterpolate = (
+    value: number,
+    points: Array<[number, number]>
+  ): number => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+
+    if (value <= points[0][0]) {
+      return points[0][1];
+    }
+
+    for (let i = 1; i < points.length; i++) {
+      const [x1, y1] = points[i - 1];
+      const [x2, y2] = points[i];
+
+      if (value <= x2) {
+        const ratio =
+          (value - x1) /
+          Math.max(x2 - x1, 0.000001);
+
+        return y1 + (y2 - y1) * ratio;
+      }
+    }
+
+    return points[points.length - 1][1];
+  };
+
+  // 1. NDVI â€” plynulĂ© skĂłre podle pomÄ›ru k cĂ­li fĂˇze.
+  const ndviRatio =
+    target > 0
+      ? ndvi / target
+      : 0;
+
+  const continuousNdviScore =
+    clampScore(
+      scoreInterpolate(
+        ndviRatio,
+        [
+          [0.40, 0],
+          [0.50, 20],
+          [0.65, 45],
+          [0.80, 70],
+          [0.90, 85],
+          [1.00, 100],
+        ]
+      )
+    );
+
+  // 2. Trend NDVI â€” 60 % relativnĂ­ zmÄ›na, 40 % slope.
+  let continuousTrendScore:
+    number | null = null;
+
+  if (trendHistory.length >= 2) {
+    const values = [
+      ...trendHistory.map(
+        (item) => Number(item.ndvi)
+      ),
+      ndvi,
+    ].filter(Number.isFinite);
+
+    const n = values.length;
+    const xMean = (n - 1) / 2;
+
+    const yMean =
+      values.reduce(
+        (sum, value) => sum + value,
+        0
+      ) / n;
+
+    let numerator = 0;
+    let denominator = 0;
+
+    values.forEach(
+      (value, index) => {
+        const xDelta =
+          index - xMean;
+
+        numerator +=
+          xDelta * (value - yMean);
+
+        denominator +=
+          xDelta * xDelta;
+      }
+    );
+
+    const slope =
+      denominator > 0
+        ? numerator / denominator
+        : 0;
+
+    const first = values[0];
+
+    const relativeChangePct =
+      Math.abs(first) > 0
+        ? ((ndvi - first) /
+            Math.abs(first)) *
+          100
+        : 0;
+
+    const relativeScore =
+      scoreInterpolate(
+        relativeChangePct,
+        [
+          [-30, 0],
+          [-20, 30],
+          [-10, 60],
+          [0, 80],
+          [10, 90],
+          [20, 100],
+        ]
+      );
+
+    const slopeScore =
+      scoreInterpolate(
+        slope,
+        [
+          [-0.05, 0],
+          [-0.03, 30],
+          [-0.015, 60],
+          [0, 80],
+          [0.015, 90],
+          [0.03, 100],
+        ]
+      );
+
+    continuousTrendScore =
+      clampScore(
+        relativeScore * 0.6 +
+        slopeScore * 0.4
+      );
+  } else if (
+    previousNdvi != null &&
+    Number.isFinite(previousNdvi)
+  ) {
+    const relativeChangePct =
+      Math.abs(previousNdvi) > 0
+        ? ((ndvi - previousNdvi) /
+            Math.abs(previousNdvi)) *
+          100
+        : 0;
+
+    continuousTrendScore =
+      clampScore(
+        scoreInterpolate(
+          relativeChangePct,
+          [
+            [-30, 0],
+            [-20, 30],
+            [-10, 60],
+            [0, 80],
+            [10, 90],
+            [20, 100],
+          ]
+        )
+      );
+  }
+
+  // 3. VodnĂ­ bilance â€” hodnota je vypoÄŤtena jednou vĂ˝Ĺˇe.
+  // Pokud nejsou ET0 data, pouĹľije se jejĂ­ existujĂ­cĂ­ fallback.
+  const waterBalanceScore =
+    continuousWaterBalanceScore;
+
+  // 4. AktuĂˇlnĂ­ teplota.
+  let continuousTemperatureScore:
+    number | null = null;
+
+  if (
+    weather?.temperature_c != null &&
+    stageMinTemperature != null &&
+    stageMaxTemperature != null &&
+    Number.isFinite(
+      Number(weather.temperature_c)
+    )
+  ) {
+    const temperature =
+      Number(weather.temperature_c);
+
+    const deviation =
+      temperature < stageMinTemperature
+        ? stageMinTemperature - temperature
+        : temperature > stageMaxTemperature
+          ? temperature - stageMaxTemperature
+          : 0;
+
+    continuousTemperatureScore =
+      clampScore(
+        scoreInterpolate(
+          deviation,
+          [
+            [0, 100],
+            [1, 85],
+            [2, 70],
+            [3, 55],
+            [4, 35],
+            [6, 0],
+          ]
+        )
+      );
+  }
+
+  // 5. TeplotnĂ­ vĂ˝hled â€” mĂ­rnÄ›jĹˇĂ­ neĹľ skuteÄŤnÄ› namÄ›Ĺ™enĂˇ teplota.
+  let continuousForecastTemperatureScore:
+    number | null = null;
+
+  if (
+    weather?.next24h_min_temperature_c != null &&
+    weather?.next24h_max_temperature_c != null &&
+    stageMinTemperature != null &&
+    stageMaxTemperature != null &&
+    Number.isFinite(
+      Number(
+        weather.next24h_min_temperature_c
+      )
+    ) &&
+    Number.isFinite(
+      Number(
+        weather.next24h_max_temperature_c
+      )
+    )
+  ) {
+    const forecastMin =
+      Number(
+        weather.next24h_min_temperature_c
+      );
+
+    const forecastMax =
+      Number(
+        weather.next24h_max_temperature_c
+      );
+
+    const deviation =
+      Math.max(
+        stageMinTemperature -
+          forecastMin,
+        forecastMax -
+          stageMaxTemperature,
+        0
+      );
+
+    continuousForecastTemperatureScore =
+      clampScore(
+        scoreInterpolate(
+          deviation,
+          [
+            [0, 100],
+            [1, 95],
+            [2, 85],
+            [3, 70],
+            [4, 55],
+            [6, 20],
+          ]
+        )
+      );
+  }
+
+  // 6. Vlhkost pĹŻdy.
+  // Preferujeme fyzikĂˇlnĂ­ profil projektu (wilting point -> 0,
+  // field capacity -> 100). Pokud nenĂ­ k dispozici, pouĹľijeme
+  // doporuÄŤenĂ˝ rozsah plodiny. U fallbacku je celĂ˝ doporuÄŤenĂ˝
+  // rozsah hodnocen jako pĹ™Ă­znivĂ˝; mimo nÄ›j skĂłre klesĂˇ.
+  let continuousSoilMoistureScore:
+    number | null = null;
+
+  if (
+    weather?.soil_moisture_pct != null &&
+    soilProfile?.wilting_point_pct != null &&
+    soilProfile?.field_capacity_pct != null &&
+    Number.isFinite(
+      Number(weather.soil_moisture_pct)
+    ) &&
+    Number.isFinite(
+      Number(soilProfile.wilting_point_pct)
+    ) &&
+    Number.isFinite(
+      Number(soilProfile.field_capacity_pct)
+    ) &&
+    Number(
+      soilProfile.field_capacity_pct
+    ) >
+      Number(
+        soilProfile.wilting_point_pct
+      )
+  ) {
+    const soil =
+      Number(weather.soil_moisture_pct);
+
+    const wp =
+      Number(soilProfile.wilting_point_pct);
+
+    const fc =
+      Number(soilProfile.field_capacity_pct);
+
+    continuousSoilMoistureScore =
+      clampScore(
+        ((soil - wp) /
+          (fc - wp)) *
+          100
+      );
+  } else if (
+    weather?.soil_moisture_pct != null &&
+    cropProfile?.soil_moisture_min_pct != null &&
+    cropProfile?.soil_moisture_max_pct != null &&
+    Number.isFinite(
+      Number(weather.soil_moisture_pct)
+    ) &&
+    Number.isFinite(
+      Number(cropProfile.soil_moisture_min_pct)
+    ) &&
+    Number.isFinite(
+      Number(cropProfile.soil_moisture_max_pct)
+    ) &&
+    Number(
+      cropProfile.soil_moisture_max_pct
+    ) >
+      Number(
+        cropProfile.soil_moisture_min_pct
+      )
+  ) {
+    const soil =
+      Number(weather.soil_moisture_pct);
+
+    const min =
+      Number(cropProfile.soil_moisture_min_pct);
+
+    const max =
+      Number(cropProfile.soil_moisture_max_pct);
+
+    const range =
+      max - min;
+
+    if (soil >= min && soil <= max) {
+      continuousSoilMoistureScore = 100;
+    } else {
+      const distance =
+        soil < min
+          ? min - soil
+          : soil - max;
+
+      // Jeden celĂ˝ rozsah mimo doporuÄŤenĂ© pĂˇsmo odpovĂ­dĂˇ
+      // poklesu o 70 bodĹŻ; hodnota zĹŻstĂˇvĂˇ plynulĂˇ.
+      continuousSoilMoistureScore =
+        clampScore(
+          100 -
+            (distance / range) * 70
+        );
+    }
+  }
+
+  // KanonickĂ© faktory â€” pouze tÄ›chto Ĺˇest mĂˇ vĂˇhu v AEGRIS SCORE.
+  const weightedFactors = [
+    {
+      label: "NDVI",
+      weight: 25,
+      value: continuousNdviScore,
+    },
+    {
+      label: "Trend NDVI",
+      weight: 20,
+      value: continuousTrendScore,
+    },
+    {
+      label: "VodnĂ­ bilance",
+      weight: 20,
+      value: waterBalanceScore,
+    },
+    {
+      label: "Teplota",
+      weight: 10,
+      value: continuousTemperatureScore,
+    },
+    {
+      label: "TeplotnĂ­ vĂ˝hled 24 h",
+      weight: 10,
+      value: continuousForecastTemperatureScore,
+    },
+    {
+      label: "Vlhkost pĹŻdy",
+      weight: 15,
+      value: continuousSoilMoistureScore,
+    },
+  ];
+
+  const availableFactors =
+    weightedFactors.filter(
+      (factor) =>
+        factor.value != null &&
+        Number.isFinite(
+          Number(factor.value)
+        )
+    );
+
+  const totalWeight =
+    availableFactors.reduce(
+      (sum, factor) =>
+        sum + factor.weight,
+      0
+    );
+
+  const weightedScore =
+    totalWeight > 0
+      ? availableFactors.reduce(
+          (sum, factor) =>
+            sum +
+            Number(factor.value) *
+              factor.weight,
+          0
+        ) / totalWeight
+      : 0;
+
+  const score =
+    Math.round(
+      clampScore(weightedScore)
+    );
+
+  const scoreBreakdown:
+    ScoreBreakdownItem[] =
+    availableFactors.map(
+      (factor) => ({
+        label: factor.label,
+        score: Math.round(
+          Number(factor.value)
+        ),
+        weight: factor.weight,
+        contribution:
+          Math.round(
+            (
+              (Number(factor.value) *
+                factor.weight) /
+              totalWeight
+            ) *
+              100
+          ) / 100,
+      })
+    );
+
+  const dataCompletenessPct =
+    Math.round(
+      (availableFactors.length /
+        weightedFactors.length) *
+        100
+    );
+
+  const scoreLevel:
+    ContextEvaluation["scoreLevel"] =
+    score >= 85
+      ? "Velmi dobrĂ˝ stav"
+      : score >= 70
+        ? "DobrĂ˝ stav"
+        : score >= 55
+          ? "ZvĂ˝ĹˇenĂ© riziko"
+          : score >= 40
+            ? "VysokĂ© riziko"
+            : "KritickĂ˝ stav";
+
+  let level:
+    ContextEvaluation["level"];
+
+  if (score >= 70) {
+    level =
+      warningCount > 0
+        ? "UpozornÄ›nĂ­"
+        : "OptimĂˇlnĂ­";
+  } else if (score >= 40) {
+    level = "UpozornÄ›nĂ­";
+  } else {
+    level = "KritickĂ©";
+  }
+
+  const cropLabel =
+    cropProfile?.name ??
+    "plodina";
+
+  const stageLabel =
+    growthStage ||
+    "aktuĂˇlnĂ­ rĹŻstovĂˇ fĂˇze";
+
+  let summary =
+    level === "KritickĂ©"
+      ? `AEGRIS identifikoval kritickĂ˝ stav projektu s plodinou ${cropLabel}.`
+      : level === "UpozornÄ›nĂ­"
+        ? `AEGRIS identifikoval podmĂ­nku, kterou je vhodnĂ© u ${cropLabel} sledovat.`
+        : `AktuĂˇlnÄ› dostupnĂˇ data jsou pro ${cropLabel} bez vĂ˝znamnĂ©ho varovnĂ©ho signĂˇlu.`;
+
+  if (hasLowNdvi) {
+    summary +=
+      ` NDVI je pod orientaÄŤnĂ­ ĂşrovnĂ­ pro fĂˇzi ${stageLabel}.`;
+  } else if (
+    previousNdvi != null &&
+    ndvi > previousNdvi
+  ) {
+    summary +=
+      " NDVI je oproti pĹ™edchozĂ­mu mÄ›Ĺ™enĂ­ vyĹˇĹˇĂ­.";
+  } else if (
+    previousNdvi != null &&
+    ndvi < previousNdvi
+  ) {
+    summary +=
+      " NDVI je oproti pĹ™edchozĂ­mu mÄ›Ĺ™enĂ­ niĹľĹˇĂ­.";
+  }
+
+  let recommendation =
+    level === "KritickĂ©"
+      ? "Projekt vyĹľaduje zvĂ˝Ĺˇenou pozornost. Nejprve ovÄ›Ĺ™te kritickĂ© faktory pĹ™Ă­mo v terĂ©nu a nĂˇslednÄ› rozhodnÄ›te o dalĹˇĂ­m zĂˇsahu."
+      : level === "UpozornÄ›nĂ­"
+        ? "Projekt je monitorovatelnĂ˝, ale nÄ›kterĂ˝ z dostupnĂ˝ch ukazatelĹŻ vyĹľaduje pozornost. Sledujte jeho vĂ˝voj a ovÄ›Ĺ™te skuteÄŤnĂ˝ stav porostu."
+        : "Projekt je podle aktuĂˇlnÄ› dostupnĂ˝ch dat v pĹ™Ă­znivĂ©m stavu. PokraÄŤujte v pravidelnĂ©m monitoringu a sledujte zmÄ›nu trendu.";
+
+  if (hasWaterWarning) {
+    recommendation +=
+      " VodnĂ­ reĹľim vyĹľaduje zvĂ˝Ĺˇenou pozornost vzhledem ke kombinaci dostupnĂ© vlhkosti, oÄŤekĂˇvanĂ˝ch srĂˇĹľek a evapotranspirace.";
+  }
+
+  if (hasCurrentTemperatureWarning) {
+    recommendation +=
+      " AktuĂˇlnĂ­ teplotnĂ­ podmĂ­nky jsou mimo doporuÄŤenĂ˝ rozsah plodiny a vyĹľadujĂ­ ovÄ›Ĺ™enĂ­ v terĂ©nu.";
+  }
+
+  if (hasForecastTemperatureRisk) {
+    recommendation +=
+      " TeplotnĂ­ vĂ˝hled na dalĹˇĂ­ch 24 hodin pĹ™edstavuje pĹ™edpoklĂˇdanĂ© riziko, kterĂ© je vhodnĂ© sledovat.";
+  }
+
+  if (actions.length === 0) {
+    actions.push(
+      "PokraÄŤovat v pravidelnĂ©m monitoringu a porovnat dalĹˇĂ­ NDVI analĂ˝zu s aktuĂˇlnĂ­m stavem projektu."
+    );
+  }
+
+  const priority:
+    ContextEvaluation["priority"] =
+    level === "KritickĂ©"
+      ? "KritickĂˇ"
+      : criticalCount > 0
+        ? "VysokĂˇ"
+        : warningCount >= 2
+          ? "VysokĂˇ"
+          : warningCount === 1
+            ? "StĹ™ednĂ­"
+            : "NĂ­zkĂˇ";
+
+  return {
+    level,
+    priority,
+    score,
+    scoreLevel,
+    trend: ndviTrend,
+    scoreBreakdown,
+    criticalFactorCount:
+      criticalCount,
+    warningFactorCount:
+      warningCount,
+    evaluatedFactorCount:
+      evaluatedCount,
+    dataCompletenessPct,
+    summary,
+    recommendation,
+    actions: Array.from(
+      new Set(actions)
+    ).slice(0, 5),
+    factors,
+  };
+}

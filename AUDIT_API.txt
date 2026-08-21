@@ -1,0 +1,3214 @@
+﻿============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\analysis\route.ts
+============================================================
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+
+const TOKEN_URL =
+  "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
+
+const STATS_URL =
+  "https://sh.dataspace.copernicus.eu/statistics/v1";
+
+type BoundaryPoint = {
+  latitude: number;
+  longitude: number;
+};
+
+type GeoJSONPolygon = {
+  type: "Polygon";
+  coordinates: number[][][];
+};
+
+type CopernicusStatisticsItem = {
+  interval?: {
+    from?: string;
+    to?: string;
+  };
+  outputs?: {
+    default?: {
+      bands?: {
+        B0?: {
+          stats?: {
+            mean?: number;
+          };
+        };
+      };
+    };
+  };
+};
+
+type CopernicusStatisticsResponse = {
+  data?: CopernicusStatisticsItem[];
+};
+
+type NdviHistoryItem = {
+  from: string;
+  to: string;
+  ndvi: number;
+};
+
+function isValidBoundary(
+  boundary: unknown
+): boundary is BoundaryPoint[] {
+  if (!Array.isArray(boundary)) {
+    return false;
+  }
+
+  if (boundary.length < 3) {
+    return false;
+  }
+
+  return boundary.every((point) => {
+    if (
+      point === null ||
+      typeof point !== "object"
+    ) {
+      return false;
+    }
+
+    const candidate =
+      point as Record<string, unknown>;
+
+    const latitude =
+      candidate.latitude;
+
+    const longitude =
+      candidate.longitude;
+
+    return (
+      typeof latitude === "number" &&
+      typeof longitude === "number" &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180
+    );
+  });
+}
+
+function boundaryToGeoJSON(
+  boundary: BoundaryPoint[]
+): GeoJSONPolygon {
+  const coordinates = boundary.map(
+    (point) => [
+      point.longitude,
+      point.latitude,
+    ]
+  );
+
+  coordinates.push([
+    boundary[0].longitude,
+    boundary[0].latitude,
+  ]);
+
+  return {
+    type: "Polygon",
+    coordinates: [coordinates],
+  };
+}
+
+function isCopernicusStatisticsResponse(
+  value: unknown
+): value is CopernicusStatisticsResponse {
+  if (
+    value === null ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  const candidate =
+    value as Record<string, unknown>;
+
+  if (
+    candidate.data !== undefined &&
+    !Array.isArray(candidate.data)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function extractNdvi(
+  item: CopernicusStatisticsItem
+): number | null {
+  const ndvi =
+    item.outputs?.default?.bands?.B0?.stats?.mean;
+
+  return typeof ndvi === "number" &&
+    Number.isFinite(ndvi)
+    ? ndvi
+    : null;
+}
+
+export async function GET(
+  request: Request
+) {
+  try {
+    // --------------------------------------------------
+    // 1. SUPABASE / PĹIHLĂĹ ENĂť UĹ˝IVATEL
+    // --------------------------------------------------
+
+    const cookieStore =
+      await cookies();
+
+    const supabase =
+      createServerClient(
+        process.env
+          .NEXT_PUBLIC_SUPABASE_URL!,
+        process.env
+          .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
+
+            setAll(cookiesToSet) {
+              try {
+                cookiesToSet.forEach(
+                  ({
+                    name,
+                    value,
+                    options,
+                  }) => {
+                    cookieStore.set(
+                      name,
+                      value,
+                      options
+                    );
+                  }
+                );
+              } catch {
+                // Cookie update nenĂ­ v tomto mĂ­stÄ›
+                // kritickĂ˝ pro samotnĂ© naÄŤtenĂ­ uĹľivatele.
+              }
+            },
+          },
+        }
+      );
+
+    const {
+      data: { user },
+      error: userError,
+    } =
+      await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        {
+          error:
+            "UĹľivatel nenĂ­ pĹ™ihlĂˇĹˇen.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. PARAMETRY
+    // --------------------------------------------------
+
+    const { searchParams } =
+      new URL(request.url);
+
+    const projectIdParam =
+      searchParams.get(
+        "projectId"
+      );
+
+    const latitudeParam =
+      searchParams.get(
+        "latitude"
+      );
+
+    const longitudeParam =
+      searchParams.get(
+        "longitude"
+      );
+
+    const projectId =
+      projectIdParam
+        ? Number(projectIdParam)
+        : null;
+
+    // --------------------------------------------------
+    // 3. PROJEKT
+    // --------------------------------------------------
+
+    let latitude: number | null =
+      null;
+
+    let longitude: number | null =
+      null;
+
+    let boundary:
+      | BoundaryPoint[]
+      | null = null;
+
+    if (
+      projectId !== null &&
+      Number.isFinite(projectId)
+    ) {
+      const {
+        data: project,
+        error: projectError,
+      } = await supabase
+        .from("projects")
+        .select(
+          "id, latitude, longitude, boundary, user_id"
+        )
+        .eq("id", projectId)
+        .eq(
+          "user_id",
+          user.id
+        )
+        .single();
+
+      if (
+        projectError ||
+        !project
+      ) {
+        console.error(
+          "CHYBA NAÄŚTENĂŤ PROJEKTU:",
+          projectError
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Projekt nebyl nalezen nebo k nÄ›mu nemĂˇĹˇ pĹ™Ă­stup.",
+          },
+          { status: 404 }
+        );
+      }
+
+      latitude =
+        typeof project.latitude ===
+        "number"
+          ? project.latitude
+          : Number(
+              project.latitude
+            );
+
+      longitude =
+        typeof project.longitude ===
+        "number"
+          ? project.longitude
+          : Number(
+              project.longitude
+            );
+
+      if (
+        isValidBoundary(
+          project.boundary
+        )
+      ) {
+        boundary =
+          project.boundary;
+      }
+    }
+
+    // --------------------------------------------------
+    // 4. ZĂLOĹ˝NĂŤ REĹ˝IM
+    // --------------------------------------------------
+
+    if (
+      latitude === null ||
+      !Number.isFinite(latitude)
+    ) {
+      latitude =
+        latitudeParam !== null
+          ? Number(latitudeParam)
+          : null;
+    }
+
+    if (
+      longitude === null ||
+      !Number.isFinite(longitude)
+    ) {
+      longitude =
+        longitudeParam !== null
+          ? Number(longitudeParam)
+          : null;
+    }
+
+    if (
+      latitude === null ||
+      longitude === null ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ platnĂ© souĹ™adnice nebo projectId.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 5. OAUTH COPERNICUS
+    // --------------------------------------------------
+
+    const clientId =
+      process.env
+        .SENTINEL_CLIENT_ID;
+
+    const clientSecret =
+      process.env
+        .SENTINEL_CLIENT_SECRET;
+
+    if (
+      !clientId ||
+      !clientSecret
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ SENTINEL_CLIENT_ID nebo SENTINEL_CLIENT_SECRET",
+        },
+        { status: 500 }
+      );
+    }
+
+    const tokenResponse =
+      await fetch(
+        TOKEN_URL,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+
+          body: new URLSearchParams({
+            grant_type:
+              "client_credentials",
+
+            client_id:
+              clientId,
+
+            client_secret:
+              clientSecret,
+          }),
+        }
+      );
+
+    if (
+      !tokenResponse.ok
+    ) {
+      const errorText =
+        await tokenResponse.text();
+
+      console.error(
+        "OAUTH ERROR:",
+        errorText
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "OAuth selhal",
+          details:
+            errorText,
+        },
+        { status: 500 }
+      );
+    }
+
+    const token =
+      (await tokenResponse.json()) as {
+        access_token?: string;
+      };
+
+    const accessToken =
+      token.access_token;
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          error:
+            "OAuth odpovÄ›ÄŹ neobsahuje access_token.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 6. EVALSCRIPT NDVI
+    // --------------------------------------------------
+
+    const evalscript = `
+ //VERSION=3
+
+ function setup() {
+   return {
+     input: [
+       {
+         bands: ["B04", "B08", "dataMask"]
+       }
+     ],
+
+     output: [
+       {
+         id: "default",
+         bands: 1,
+         sampleType: "FLOAT32"
+       },
+
+       {
+         id: "dataMask",
+         bands: 1
+       }
+     ]
+   };
+ }
+
+ function evaluatePixel(samples) {
+   const b04 = samples.B04;
+   const b08 = samples.B08;
+
+   const denominator = b08 + b04;
+
+   let ndvi = 0;
+
+   if (denominator !== 0) {
+     ndvi =
+       (b08 - b04) /
+       denominator;
+   }
+
+   return {
+     default: [ndvi],
+     dataMask: [samples.dataMask]
+   };
+ }
+ `;
+
+    // --------------------------------------------------
+    // 7. OBDOBĂŤ - POSLEDNĂŤCH 6 MÄšSĂŤCĹ®
+    // --------------------------------------------------
+
+    const to = new Date();
+
+    const from =
+      new Date(to);
+
+    from.setUTCMonth(
+      from.getUTCMonth() - 6
+    );
+
+    // --------------------------------------------------
+    // 8. GEOMETRIE PRO COPERNICUS
+    // --------------------------------------------------
+
+    let bounds:
+      | Record<string, unknown>;
+
+    if (boundary) {
+      const polygon =
+        boundaryToGeoJSON(
+          boundary
+        );
+
+      bounds = {
+        geometry: polygon,
+      };
+
+      console.log(
+        "AEGRIS ANALYSIS: POUĹ˝ĂŤVĂM HRANICI POZEMKU"
+      );
+
+      console.log(
+        "AEGRIS BOUNDARY:",
+        JSON.stringify(
+          polygon,
+          null,
+          2
+        )
+      );
+    } else {
+      bounds = {
+        bbox: [
+          longitude - 0.001,
+          latitude - 0.001,
+          longitude + 0.001,
+          latitude + 0.001,
+        ],
+      };
+
+      console.log(
+        "AEGRIS ANALYSIS: STARĂť BBOX REĹ˝IM"
+      );
+    }
+
+    // --------------------------------------------------
+    // 9. COPERNICUS STATISTICS API
+    // --------------------------------------------------
+
+    const response =
+      await fetch(
+        STATS_URL,
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
+
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            input: {
+              bounds,
+
+              data: [
+                {
+                  type:
+                    "sentinel-2-l2a",
+
+                  dataFilter: {
+                    maxCloudCoverage:
+                      20,
+                  },
+                },
+              ],
+            },
+
+            aggregation: {
+              timeRange: {
+                from:
+                  from.toISOString(),
+
+                to:
+                  to.toISOString(),
+              },
+
+              aggregationInterval: {
+                of: "P10D",
+              },
+
+              lastIntervalBehavior:
+                "SHORTEN",
+
+              width: 64,
+
+              height: 64,
+
+              evalscript,
+            },
+
+            calculations: {
+              default: {
+                statistics: {
+                  default: {
+                    percentiles: {
+                      k: [
+                        5,
+                        50,
+                        95,
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          }),
+        }
+      );
+
+    // --------------------------------------------------
+    // 10. RAW ODPOVÄšÄŽ
+    // --------------------------------------------------
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "STATISTICS STATUS:",
+      response.status
+    );
+
+    console.log(
+      "STATISTICS CONTENT-TYPE:",
+      response.headers.get(
+        "content-type"
+      )
+    );
+
+    console.log(
+      "STATISTICS RAW RESPONSE:",
+      responseText
+    );
+
+    // --------------------------------------------------
+    // 11. CHYBA COPERNICUS
+    // --------------------------------------------------
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error:
+            "Statistics API error",
+
+          status:
+            response.status,
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 12. JSON
+    // --------------------------------------------------
+
+    let json: unknown;
+
+    try {
+      json =
+        JSON.parse(
+          responseText
+        );
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrĂˇtil neplatnĂ˝ JSON",
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !isCopernicusStatisticsResponse(
+        json
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrĂˇtil neoÄŤekĂˇvanou strukturu JSON.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 13. HISTORIE NDVI
+    // --------------------------------------------------
+
+    const history: NdviHistoryItem[] =
+      (json.data ?? [])
+        .map(
+          (
+            item
+          ): NdviHistoryItem | null => {
+            const ndvi =
+              extractNdvi(item);
+
+            const interval =
+              item.interval;
+
+            if (
+              !interval?.from ||
+              !interval.to ||
+              ndvi === null
+            ) {
+              return null;
+            }
+
+            return {
+              from:
+                interval.from,
+
+              to:
+                interval.to,
+
+              ndvi,
+            };
+          }
+        )
+        .filter(
+          (
+            item
+          ): item is NdviHistoryItem =>
+            item !== null
+        );
+
+    console.log(
+      "NDVI HISTORY:",
+      JSON.stringify(
+        history,
+        null,
+        2
+      )
+    );
+
+    // --------------------------------------------------
+    // 14. SEĹAZENĂŤ HISTORIE
+    // --------------------------------------------------
+
+    history.sort(
+      (a, b) =>
+        new Date(
+          a.from
+        ).getTime() -
+        new Date(
+          b.from
+        ).getTime()
+    );
+
+    // --------------------------------------------------
+    // 15. AKTUĂLNĂŤ NDVI
+    // --------------------------------------------------
+
+    const firstHistoryItem =
+      history.length > 0
+        ? history[0]
+        : null;
+
+    const lastHistoryItem =
+      history.length > 0
+        ? history[
+            history.length - 1
+          ]
+        : null;
+
+    const startNdvi =
+      firstHistoryItem?.ndvi ??
+      null;
+
+    const currentNdvi =
+      lastHistoryItem?.ndvi ??
+      null;
+
+    // --------------------------------------------------
+    // 16. ZMÄšNA NDVI
+    // --------------------------------------------------
+
+    let change:
+      | number
+      | null = null;
+
+    if (
+      startNdvi !== null &&
+      currentNdvi !== null
+    ) {
+      change =
+        currentNdvi -
+        startNdvi;
+    }
+
+    // --------------------------------------------------
+    // 17. TREND
+    // --------------------------------------------------
+
+    let trend =
+      "StabilnĂ­";
+
+    if (
+      change !== null
+    ) {
+      if (
+        change <= -0.05
+      ) {
+        trend =
+          "ZhorĹˇujĂ­cĂ­ se";
+      } else if (
+        change >= 0.05
+      ) {
+        trend =
+          "ZlepĹˇujĂ­cĂ­ se";
+      } else {
+        trend =
+          "StabilnĂ­";
+      }
+    }
+
+    // --------------------------------------------------
+    // 18. RIZIKO
+    // --------------------------------------------------
+
+    let risk =
+      "NĂ­zkĂ©";
+
+    if (
+      currentNdvi !== null &&
+      currentNdvi < 0.20
+    ) {
+      risk =
+        "KritickĂ©";
+    } else if (
+      change !== null &&
+      change <= -0.15
+    ) {
+      risk =
+        "KritickĂ©";
+    } else if (
+      change !== null &&
+      change <= -0.05
+    ) {
+      risk =
+        "VysokĂ©";
+    } else if (
+      currentNdvi !== null &&
+      currentNdvi < 0.40
+    ) {
+      risk =
+        "VysokĂ©";
+    } else if (
+      currentNdvi !== null &&
+      currentNdvi < 0.60
+    ) {
+      risk =
+        "StĹ™ednĂ­";
+    }
+
+    // --------------------------------------------------
+    // 19. LOG
+    // --------------------------------------------------
+
+    console.log(
+      "AEGRIS ANALYTICKĂť VĂťSLEDEK:",
+      {
+        projectId,
+        latitude,
+        longitude,
+        hasBoundary:
+          boundary !== null,
+        boundaryPoints:
+          boundary?.length ?? 0,
+        startNdvi,
+        currentNdvi,
+        change,
+        trend,
+        risk,
+      }
+    );
+
+    // --------------------------------------------------
+    // 20. ODPOVÄšÄŽ
+    // --------------------------------------------------
+
+    return NextResponse.json({
+      projectId,
+      latitude,
+      longitude,
+      hasBoundary:
+        boundary !== null,
+      boundaryPoints:
+        boundary?.length ?? 0,
+      from:
+        from.toISOString(),
+      to:
+        to.toISOString(),
+      count:
+        history.length,
+      ndvi:
+        currentNdvi,
+      startNdvi,
+      currentNdvi,
+      change,
+      trend,
+      risk,
+      history,
+      raw: json,
+    });
+  } catch (error) {
+    console.error(
+      "ANALYSIS ROUTE ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Chyba v analysis route",
+
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      { status: 500 }
+    );
+  }
+}
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\analysis\history\route.ts
+============================================================
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+
+const TOKEN_URL =
+  "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
+
+const STATS_URL =
+  "https://sh.dataspace.copernicus.eu/statistics/v1";
+
+type HistoryItem = {
+  from: string;
+  to: string;
+  ndvi: number;
+};
+
+type CopernicusStatisticsItem = {
+  interval?: {
+    from?: string;
+    to?: string;
+  };
+  outputs?: {
+    ndvi?: {
+      bands?: {
+        B0?: {
+          stats?: {
+            mean?: number;
+          };
+        };
+      };
+    };
+  };
+};
+
+type CopernicusStatisticsResponse = {
+  data?: CopernicusStatisticsItem[];
+};
+
+function getDateDaysAgo(days: number) {
+  const date = new Date();
+  date.setUTCDate(
+    date.getUTCDate() - days
+  );
+
+  return date.toISOString();
+}
+
+function isCopernicusStatisticsResponse(
+  value: unknown
+): value is CopernicusStatisticsResponse {
+  if (
+    value === null ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  const candidate =
+    value as Record<string, unknown>;
+
+  if (
+    candidate.data !== undefined &&
+    !Array.isArray(candidate.data)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function extractNdvi(
+  item: CopernicusStatisticsItem
+): number | null {
+  const mean =
+    item.outputs
+      ?.ndvi
+      ?.bands
+      ?.B0
+      ?.stats
+      ?.mean;
+
+  if (
+    mean == null ||
+    !Number.isFinite(Number(mean))
+  ) {
+    return null;
+  }
+
+  return Number(mean);
+}
+
+export async function GET(
+  request: Request
+) {
+  try {
+    // --------------------------------------------------
+    // 1. ENV
+    // --------------------------------------------------
+
+    const clientId =
+      process.env.SENTINEL_CLIENT_ID;
+
+    const clientSecret =
+      process.env.SENTINEL_CLIENT_SECRET;
+
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    const supabaseServiceKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    const supabasePublishableKey =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+    if (
+      !clientId ||
+      !clientSecret
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ SENTINEL_CLIENT_ID nebo SENTINEL_CLIENT_SECRET",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !supabaseUrl ||
+      !supabaseServiceKey
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ NEXT_PUBLIC_SUPABASE_URL nebo SUPABASE_SERVICE_ROLE_KEY",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!supabasePublishableKey) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. PĹIHLĂĹ ENĂť UĹ˝IVATEL
+    // --------------------------------------------------
+
+    const cookieStore =
+      await cookies();
+
+    const authSupabase =
+      createServerClient(
+        supabaseUrl,
+        supabasePublishableKey,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
+
+            setAll(cookiesToSet) {
+              try {
+                cookiesToSet.forEach(
+                  ({
+                    name,
+                    value,
+                    options,
+                  }) => {
+                    cookieStore.set(
+                      name,
+                      value,
+                      options
+                    );
+                  }
+                );
+              } catch {
+                // Cookie update nenĂ­ v tomto mĂ­stÄ›
+                // kritickĂ˝ pro naÄŤtenĂ­ uĹľivatele.
+              }
+            },
+          },
+        }
+      );
+
+    const {
+      data: { user },
+      error: userError,
+    } =
+      await authSupabase.auth.getUser();
+
+    if (
+      userError ||
+      !user
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "UĹľivatel nenĂ­ pĹ™ihlĂˇĹˇen.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // Server-side klient pro DB operace.
+    // SERVICE ROLE KEY nikdy neposĂ­lat do frontendu.
+    const supabase =
+      createClient(
+        supabaseUrl,
+        supabaseServiceKey
+      );
+
+    // --------------------------------------------------
+    // 3. PARAMETRY
+    // --------------------------------------------------
+
+    const { searchParams } =
+      new URL(request.url);
+
+    const latitude =
+      Number(
+        searchParams.get(
+          "latitude"
+        )
+      );
+
+    const longitude =
+      Number(
+        searchParams.get(
+          "longitude"
+        )
+      );
+
+    const projectId =
+      Number(
+        searchParams.get(
+          "projectId"
+        )
+      );
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "NeplatnĂˇ latitude nebo longitude",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      !Number.isFinite(projectId)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "ChybĂ­ platnĂ© projectId",
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log(
+      "======================================"
+    );
+
+    console.log(
+      "HISTORICKĂ ANALĂťZA"
+    );
+
+    console.log(
+      "Project ID:",
+      projectId
+    );
+
+    console.log(
+      "Latitude:",
+      latitude
+    );
+
+    console.log(
+      "Longitude:",
+      longitude
+    );
+
+    console.log(
+      "User ID:",
+      user.id
+    );
+
+    console.log(
+      "======================================"
+    );
+
+    // --------------------------------------------------
+    // 4. OVÄšĹENĂŤ VLASTNICTVĂŤ PROJEKTU
+    // --------------------------------------------------
+
+    const {
+      data: project,
+      error: projectError,
+    } =
+      await supabase
+        .from("projects")
+        .select(
+          "id, user_id"
+        )
+        .eq(
+          "id",
+          projectId
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .single();
+
+    if (
+      projectError ||
+      !project
+    ) {
+      console.error(
+        "CHYBA OVÄšĹENĂŤ PROJEKTU:",
+        projectError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Projekt nebyl nalezen nebo k nÄ›mu nemĂˇĹˇ pĹ™Ă­stup.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 5. OAUTH TOKEN
+    // --------------------------------------------------
+
+    const tokenResponse =
+      await fetch(
+        TOKEN_URL,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+
+          body:
+            new URLSearchParams({
+              grant_type:
+                "client_credentials",
+
+              client_id:
+                clientId,
+
+              client_secret:
+                clientSecret,
+            }),
+        }
+      );
+
+    if (
+      !tokenResponse.ok
+    ) {
+      const text =
+        await tokenResponse.text();
+
+      console.error(
+        "OAUTH CHYBA:",
+        text
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "OAuth selhal",
+
+          details:
+            text,
+        },
+        { status: 500 }
+      );
+    }
+
+    const token =
+      (await tokenResponse.json()) as {
+        access_token?: string;
+      };
+
+    const accessToken =
+      token.access_token;
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          error:
+            "OAuth odpovÄ›ÄŹ neobsahuje access_token.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 6. ÄŚASOVĂ‰ OBDOBĂŤ
+    // --------------------------------------------------
+
+    const from =
+      getDateDaysAgo(180);
+
+    const to =
+      new Date().toISOString();
+
+    // --------------------------------------------------
+    // 7. OBLAST KOLEM BODU
+    // --------------------------------------------------
+
+    const bbox = [
+      longitude - 0.001,
+      latitude - 0.001,
+      longitude + 0.001,
+      latitude + 0.001,
+    ];
+
+    // --------------------------------------------------
+    // 8. EVALSCRIPT NDVI
+    // --------------------------------------------------
+
+    const evalscript = `
+//VERSION=3
+
+function setup() {
+  return {
+    input: [
+      {
+        bands: ["B04", "B08", "dataMask"]
+      }
+    ],
+
+    output: [
+      {
+        id: "ndvi",
+        bands: 1,
+        sampleType: "FLOAT32"
+      },
+      {
+        id: "dataMask",
+        bands: 1
+      }
+    ]
+  };
+}
+
+function evaluatePixel(samples) {
+  const b04 = samples.B04;
+  const b08 = samples.B08;
+
+  const denominator = b08 + b04;
+
+  if (denominator === 0) {
+    return {
+      ndvi: [0],
+      dataMask: [0]
+    };
+  }
+
+  const ndvi = (b08 - b04) / denominator;
+
+  return {
+    ndvi: [ndvi],
+    dataMask: [samples.dataMask]
+  };
+}
+`;
+
+    // --------------------------------------------------
+    // 9. STATISTICS REQUEST
+    // --------------------------------------------------
+
+    const statsRequest = {
+      input: {
+        bounds: {
+          bbox,
+
+          properties: {
+            crs:
+              "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
+          },
+        },
+
+        data: [
+          {
+            type:
+              "sentinel-2-l2a",
+
+            dataFilter: {
+              mosaickingOrder:
+                "leastCC",
+
+              maxCloudCoverage:
+                30,
+            },
+          },
+        ],
+      },
+
+      aggregation: {
+        timeRange: {
+          from,
+          to,
+        },
+
+        aggregationInterval: {
+          of: "P10D",
+        },
+
+        evalscript,
+
+        resx: 10,
+        resy: 10,
+      },
+
+      calculations: {
+        default: {
+          statistics: {
+            default: {},
+          },
+        },
+      },
+    };
+
+    console.log(
+      "STATISTICS REQUEST ODESĂŤLĂM"
+    );
+
+    // --------------------------------------------------
+    // 10. COPERNICUS
+    // --------------------------------------------------
+
+    const response =
+      await fetch(
+        STATS_URL,
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
+
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json",
+          },
+
+          body:
+            JSON.stringify(
+              statsRequest
+            ),
+        }
+      );
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "STATISTICS STATUS:",
+      response.status
+    );
+
+    if (
+      !response.ok
+    ) {
+      console.error(
+        "STATISTICS RESPONSE:",
+        responseText
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Statistics API chyba",
+
+          status:
+            response.status,
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 11. JSON
+    // --------------------------------------------------
+
+    let json: unknown;
+
+    try {
+      json =
+        JSON.parse(
+          responseText
+        );
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrĂˇtil neplatnĂ˝ JSON",
+
+          response:
+            responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !isCopernicusStatisticsResponse(
+        json
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Copernicus vrĂˇtil neoÄŤekĂˇvanou strukturu JSON.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 12. NDVI HISTORIE
+    // --------------------------------------------------
+
+    const history: HistoryItem[] =
+      (json.data ?? [])
+        .map(
+          (
+            item
+          ): HistoryItem | null => {
+            const mean =
+              extractNdvi(item);
+
+            if (
+              mean === null
+            ) {
+              return null;
+            }
+
+            if (
+              !item.interval?.from ||
+              !item.interval.to
+            ) {
+              return null;
+            }
+
+            return {
+              from:
+                item.interval.from,
+
+              to:
+                item.interval.to,
+
+              ndvi:
+                mean,
+            };
+          }
+        )
+        .filter(
+          (
+            item
+          ): item is HistoryItem =>
+            item !== null
+        );
+
+    history.sort(
+      (a, b) =>
+        new Date(
+          a.from
+        ).getTime() -
+        new Date(
+          b.from
+        ).getTime()
+    );
+
+    console.log(
+      "NALEZENO NDVI INTERVALĹ®:",
+      history.length
+    );
+
+    console.log(
+      "NDVI HISTORIE:",
+      history
+    );
+
+    // --------------------------------------------------
+    // 13. SMAZĂNĂŤ STARĂ‰ HISTORIE PROJEKTU
+    // --------------------------------------------------
+
+    const {
+      error: deleteError,
+    } = await supabase
+      .from("ndvi_history")
+      .delete()
+      .eq(
+        "project_id",
+        projectId
+      );
+
+    if (
+      deleteError
+    ) {
+      console.error(
+        "CHYBA PĹI MAZĂNĂŤ STARĂ‰ HISTORIE:",
+        deleteError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "NepodaĹ™ilo se smazat starou NDVI historii",
+
+          details:
+            deleteError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    console.log(
+      "STARĂ HISTORIE SMAZĂNA"
+    );
+
+    // --------------------------------------------------
+    // 14. ULOĹ˝ENĂŤ NOVĂ‰ HISTORIE
+    // --------------------------------------------------
+
+    if (
+      history.length > 0
+    ) {
+      const rows =
+        history.map(
+          (item) => ({
+            project_id:
+              projectId,
+
+            period_from:
+              item.from,
+
+            period_to:
+              item.to,
+
+            ndvi:
+              item.ndvi,
+          })
+        );
+
+      const {
+        error: insertError,
+      } = await supabase
+        .from("ndvi_history")
+        .insert(rows);
+
+      if (
+        insertError
+      ) {
+        console.error(
+          "CHYBA PĹI UKLĂDĂNĂŤ NDVI HISTORIE:",
+          insertError
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "NepodaĹ™ilo se uloĹľit NDVI historii",
+
+            details:
+              insertError.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      console.log(
+        "NDVI HISTORIE ULOĹ˝ENA:",
+        rows.length,
+        "zĂˇznamĹŻ"
+      );
+    }
+
+    // --------------------------------------------------
+    // 15. ANALYTIKA TRENDU
+    // --------------------------------------------------
+
+    const firstHistoryItem =
+      history.length > 0
+        ? history[0]
+        : null;
+
+    const lastHistoryItem =
+      history.length > 0
+        ? history[
+            history.length - 1
+          ]
+        : null;
+
+    const startNdvi =
+      firstHistoryItem?.ndvi ??
+      null;
+
+    const currentNdvi =
+      lastHistoryItem?.ndvi ??
+      null;
+
+    let change:
+      | number
+      | null = null;
+
+    if (
+      startNdvi !== null &&
+      currentNdvi !== null
+    ) {
+      change =
+        currentNdvi -
+        startNdvi;
+    }
+
+    // --------------------------------------------------
+    // 16. URÄŚENĂŤ TRENDU
+    // --------------------------------------------------
+
+    let trend =
+      "StabilnĂ­";
+
+    if (
+      change !== null
+    ) {
+      if (
+        change > 0.05
+      ) {
+        trend =
+          "ZlepĹˇujĂ­cĂ­ se";
+      } else if (
+        change < -0.05
+      ) {
+        trend =
+          "ZhorĹˇujĂ­cĂ­ se";
+      }
+    }
+
+    // --------------------------------------------------
+    // 17. URÄŚENĂŤ RIZIKA
+    // --------------------------------------------------
+
+    let risk =
+      "NĂ­zkĂ©";
+
+    if (
+      currentNdvi === null
+    ) {
+      risk =
+        "NeznĂˇmĂ©";
+    } else if (
+      currentNdvi < 0.20
+    ) {
+      risk =
+        "KritickĂ©";
+    } else if (
+      currentNdvi < 0.40
+    ) {
+      risk =
+        "VysokĂ©";
+    } else if (
+      currentNdvi < 0.60
+    ) {
+      risk =
+        "StĹ™ednĂ­";
+    } else {
+      risk =
+        "NĂ­zkĂ©";
+    }
+
+    // --------------------------------------------------
+    // 18. PROCENTUĂLNĂŤ ZMÄšNA
+    // --------------------------------------------------
+
+    let changePercent:
+      | number
+      | null = null;
+
+    if (
+      startNdvi !== null &&
+      currentNdvi !== null &&
+      startNdvi !== 0
+    ) {
+      changePercent =
+        ((currentNdvi -
+          startNdvi) /
+          Math.abs(
+            startNdvi
+          )) *
+        100;
+    }
+
+    // --------------------------------------------------
+    // 19. LOG ANALYTIKY
+    // --------------------------------------------------
+
+    console.log(
+      "======================================"
+    );
+
+    console.log(
+      "ANALYTICKĂť VĂťSLEDEK:"
+    );
+
+    console.log(
+      "Start NDVI:",
+      startNdvi
+    );
+
+    console.log(
+      "Current NDVI:",
+      currentNdvi
+    );
+
+    console.log(
+      "ZmÄ›na:",
+      change
+    );
+
+    console.log(
+      "ZmÄ›na %:",
+      changePercent
+    );
+
+    console.log(
+      "Trend:",
+      trend
+    );
+
+    console.log(
+      "Riziko:",
+      risk
+    );
+
+    console.log(
+      "======================================"
+    );
+
+    // --------------------------------------------------
+    // 20. ODPOVÄšÄŽ FRONTENDU
+    // --------------------------------------------------
+
+    return NextResponse.json({
+      latitude,
+      longitude,
+      projectId,
+
+      from,
+      to,
+
+      count:
+        history.length,
+
+      history,
+
+      ndvi:
+        currentNdvi,
+
+      currentNdvi,
+
+      startNdvi,
+
+      change,
+
+      changePercent,
+
+      trend,
+
+      risk,
+    });
+  } catch (error) {
+    console.error(
+      "HISTORICKĂ ANALĂťZA CHYBA:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "NeoÄŤekĂˇvanĂˇ chyba serveru",
+
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      { status: 500 }
+    );
+  }
+}
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\demo\route.ts
+============================================================
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+
+    const fullName =
+      typeof body.full_name === "string"
+        ? body.full_name.trim()
+        : "";
+
+    const company =
+      typeof body.company === "string"
+        ? body.company.trim()
+        : "";
+
+    const email =
+      typeof body.email === "string"
+        ? body.email.trim().toLowerCase()
+        : "";
+
+    const phone =
+      typeof body.phone === "string"
+        ? body.phone.trim()
+        : "";
+
+    const message =
+      typeof body.message === "string"
+        ? body.message.trim()
+        : "";
+
+    if (!fullName || !email) {
+      return NextResponse.json(
+        {
+          error:
+            "JmĂ©no a e-mail jsou povinnĂ©.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ============================================
+    // KONTROLA, ZDA UĹ˝ E-MAIL DEMO NEMÄšL
+    // ============================================
+
+    const { data: existingRequest, error: existingError } =
+      await supabaseAdmin
+        .from("demo_requests")
+        .select("id, status, user_id")
+        .eq("email", email)
+        .limit(1)
+        .maybeSingle();
+
+    if (existingError) {
+      console.error(
+        "CHYBA KONTROLY DEMO Ĺ˝ĂDOSTI:",
+        existingError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Ĺ˝Ăˇdost se nepodaĹ™ilo zpracovat.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (existingRequest) {
+      return NextResponse.json(
+        {
+          error:
+            "Pro tento e-mail uĹľ byla DEMO ĹľĂˇdost evidovĂˇna.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // ============================================
+    // ULOĹ˝ENĂŤ DEMO Ĺ˝ĂDOSTI
+    // ============================================
+
+    const { error: insertError } =
+      await supabaseAdmin
+        .from("demo_requests")
+        .insert({
+          full_name: fullName,
+          company: company || null,
+          email,
+          phone: phone || null,
+          message: message || null,
+          status: "new",
+        });
+
+    if (insertError) {
+      console.error(
+        "CHYBA ULOĹ˝ENĂŤ DEMO Ĺ˝ĂDOSTI:",
+        insertError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Ĺ˝Ăˇdost se nepodaĹ™ilo odeslat.",
+        },
+        { status: 500 }
+      );
+    }
+
+        // ============================================
+    // OKAMĹ˝ITĂ AKTIVACE DEMO
+    // ============================================
+
+    const activationUrl = new URL(
+      "/api/demo/activate",
+      request.url
+    );
+
+    const activationResponse = await fetch(
+      activationUrl.toString(),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.CRON_SECRET}`,
+        },
+      }
+    );
+
+    if (!activationResponse.ok) {
+      console.error(
+        "OKAMĹ˝ITĂ AKTIVACE DEMO SELHALA:",
+        await activationResponse.text()
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message:
+          "VaĹˇi ĹľĂˇdost jsme pĹ™ijali. DEMO ĂşÄŤet bude aktivovĂˇn a pĹ™Ă­stupovĂ© Ăşdaje vĂˇm pĹ™ijdou e-mailem.",
+      },
+      { status: 201 }
+    );
+    
+  } catch (error) {
+    console.error(
+      "CHYBA DEMO API:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "NepodaĹ™ilo se zpracovat ĹľĂˇdost.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\demo\accept\route.ts
+============================================================
+import { NextResponse } from "next/server";
+import crypto from "crypto";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+function verifyInviteToken(token: string) {
+  const parts = token.split(".");
+
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [payload, signature] = parts;
+
+  const expectedSignature = crypto
+    .createHmac(
+      "sha256",
+      process.env.CRON_SECRET!
+    )
+    .update(payload)
+    .digest("base64url");
+
+  const signaturesMatch =
+    crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+
+  if (!signaturesMatch) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(
+        payload,
+        "base64url"
+      ).toString("utf8")
+    );
+
+    if (
+      !decoded.userId ||
+      !decoded.email ||
+      !decoded.expiresAt
+    ) {
+      return null;
+    }
+
+    if (
+      new Date(decoded.expiresAt) <=
+      new Date()
+    ) {
+      return null;
+    }
+
+    return decoded as {
+      userId: string;
+      email: string;
+      expiresAt: string;
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function POST(
+  request: Request
+) {
+  try {
+    const body = await request.json();
+
+    const token =
+      typeof body.token === "string"
+        ? body.token
+        : "";
+
+    const password =
+      typeof body.password === "string"
+        ? body.password
+        : "";
+
+    if (!token || !password) {
+      return NextResponse.json(
+        {
+          error:
+            "Token a heslo jsou povinnĂ©.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (password.length < 8) {
+      return NextResponse.json(
+        {
+          error:
+            "Heslo musĂ­ mĂ­t alespoĹ 8 znakĹŻ.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const invite =
+      verifyInviteToken(token);
+
+    if (!invite) {
+      return NextResponse.json(
+        {
+          error:
+            "PozvĂˇnka je neplatnĂˇ nebo jiĹľ vyprĹˇela.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ============================================
+    // OVÄšĹENĂŤ AUTH UĹ˝IVATELE
+    // ============================================
+
+    const {
+      data: userData,
+      error: userError,
+    } =
+      await supabaseAdmin.auth.admin.getUserById(
+        invite.userId
+      );
+
+    if (
+      userError ||
+      !userData.user
+    ) {
+      console.error(
+        "DEMO USER ERROR:",
+        userError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "DEMO ĂşÄŤet nebyl nalezen.",
+        },
+        { status: 404 }
+      );
+    }
+
+    const user =
+      userData.user;
+
+    if (
+      user.email?.toLowerCase() !==
+      invite.email.toLowerCase()
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "PozvĂˇnka neodpovĂ­dĂˇ ĂşÄŤtu.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ============================================
+    // OVÄšĹENĂŤ DEMO PROFILU
+    // ============================================
+
+    const {
+      data: profile,
+      error: profileError,
+    } =
+      await supabaseAdmin
+        .from("profiles")
+        .select(
+          "account_type, demo_expires_at"
+        )
+        .eq(
+          "id",
+          invite.userId
+        )
+        .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "DEMO PROFILE ERROR:",
+        profileError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "NepodaĹ™ilo se ovÄ›Ĺ™it DEMO ĂşÄŤet.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !profile ||
+      profile.account_type !==
+        "demo"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "DEMO ĂşÄŤet nebyl nalezen.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      !profile.demo_expires_at ||
+      new Date(
+        profile.demo_expires_at
+      ) <= new Date()
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "VaĹˇe DEMO jiĹľ vyprĹˇelo.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ============================================
+    // NASTAVENĂŤ HESLA
+    // ============================================
+
+    const {
+      error: updateError,
+    } =
+      await supabaseAdmin.auth.admin.updateUserById(
+        invite.userId,
+        {
+          password,
+        }
+      );
+
+    if (updateError) {
+      console.error(
+        "DEMO PASSWORD ERROR:",
+        updateError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Heslo se nepodaĹ™ilo nastavit.",
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      email: user.email,
+      expiresAt:
+        profile.demo_expires_at,
+    });
+  } catch (error) {
+    console.error(
+      "DEMO ACCEPT ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "NepodaĹ™ilo se dokonÄŤit DEMO ĂşÄŤet.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\demo\activate\route.ts
+============================================================
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+const DEMO_DURATION_DAYS = 14;
+
+export async function POST(request: Request) {
+  try {
+    // ============================================
+    // OCHRANA ENDPOINTU
+    // ============================================
+
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (!cronSecret) {
+      console.error("CRON_SECRET nenĂ­ nastavenĂ˝.");
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Server nenĂ­ sprĂˇvnÄ› nakonfigurovĂˇn.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const authorization = request.headers.get("authorization");
+
+    if (authorization !== `Bearer ${cronSecret}`) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unauthorized",
+        },
+        { status: 401 }
+      );
+    }
+
+    // ============================================
+    // NAÄŚTENĂŤ NOVĂťCH DEMO Ĺ˝ĂDOSTĂŤ
+    // ============================================
+
+    const { data: requests, error: requestsError } =
+      await supabaseAdmin
+        .from("demo_requests")
+        .select(
+          "id, full_name, company, email, phone, message, user_id, approved_at, created_at"
+        )
+        .is("user_id", null)
+        .is("approved_at", null)
+        .order("created_at", {
+          ascending: true,
+        })
+        .limit(10);
+
+    if (requestsError) {
+      console.error(
+        "CHYBA NAÄŚTENĂŤ DEMO Ĺ˝ĂDOSTĂŤ:",
+        requestsError
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "NepodaĹ™ilo se naÄŤĂ­st DEMO ĹľĂˇdosti.",
+          details: requestsError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!requests || requests.length === 0) {
+      return NextResponse.json({
+        success: true,
+        processed: 0,
+        failed: 0,
+        total: 0,
+        message: "Ĺ˝ĂˇdnĂ© novĂ© DEMO ĹľĂˇdosti.",
+      });
+    }
+
+    // ============================================
+    // URL APLIKACE
+    // ============================================
+
+    const appUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      new URL(request.url).origin;
+
+    const redirectTo =
+      `${appUrl}/auth/accept-invite`;
+
+    let processed = 0;
+    let failed = 0;
+
+    // Budeme vracet odkazy pro lokĂˇlnĂ­ test.
+    const activations: Array<{
+      id: number;
+      email: string;
+      userId: string;
+      inviteUrl: string;
+      expiresAt: string;
+    }> = [];
+
+    // ============================================
+    // ZPRACOVĂNĂŤ DEMO Ĺ˝ĂDOSTĂŤ
+    // ============================================
+
+    for (const demoRequest of requests) {
+      try {
+        let userId: string | null = null;
+        let isNewUser = false;
+
+        // ========================================
+        // KONTROLA EXISTUJĂŤCĂŤHO AUTH ĂšÄŚTU
+        // ========================================
+
+        const {
+          data: usersData,
+          error: usersError,
+        } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
+
+        if (usersError) {
+          console.error(
+            `CHYBA NAÄŚTENĂŤ AUTH UĹ˝IVATELĹ® PRO ${demoRequest.email}:`,
+            usersError
+          );
+
+          failed++;
+          continue;
+        }
+
+        const existingUser =
+          usersData.users.find(
+            (user) =>
+              user.email?.toLowerCase() ===
+              demoRequest.email.toLowerCase()
+          );
+
+        // ========================================
+        // EXISTUJĂŤCĂŤ UĹ˝IVATEL
+        // ========================================
+
+        if (existingUser) {
+          userId = existingUser.id;
+
+          console.log(
+            `AUTH UĹ˝IVATEL UĹ˝ EXISTUJE: ${demoRequest.email} | ${userId}`
+          );
+        }
+
+        // ========================================
+        // NOVĂť UĹ˝IVATEL
+        // ========================================
+
+        if (!userId) {
+          const {
+            data: userData,
+            error: userError,
+          } =
+            await supabaseAdmin.auth.admin.createUser({
+              email: demoRequest.email,
+              email_confirm: true,
+              user_metadata: {
+                full_name: demoRequest.full_name,
+                company: demoRequest.company,
+                account_type: "demo",
+              },
+            });
+
+          if (userError) {
+            console.error(
+              `CHYBA VYTVOĹENĂŤ ĂšÄŚTU PRO ${demoRequest.email}:`,
+              userError
+            );
+
+            failed++;
+            continue;
+          }
+
+          userId = userData.user?.id ?? null;
+          isNewUser = true;
+
+          if (!userId) {
+            console.error(
+              `AUTH UĹ˝IVATEL NEBYL VYTVOĹEN PRO ${demoRequest.email}`
+            );
+
+            failed++;
+            continue;
+          }
+
+          console.log(
+            `AUTH ĂšÄŚET VYTVOĹEN: ${demoRequest.email} | ${userId}`
+          );
+        }
+
+        // ========================================
+        // AKTIVACE 14DENNĂŤHO DEMO
+        // ========================================
+
+        const startedAt = new Date();
+
+        const expiresAt = new Date(
+          startedAt.getTime() +
+            DEMO_DURATION_DAYS *
+              24 *
+              60 *
+              60 *
+              1000
+        );
+
+        const startedAtIso = startedAt.toISOString();
+        const expiresAtIso = expiresAt.toISOString();
+
+        // ========================================
+        // PROFIL
+        // ========================================
+
+        const { error: profileError } =
+          await supabaseAdmin
+            .from("profiles")
+            .upsert(
+              {
+                id: userId,
+                account_type: "demo",
+                demo_started_at: startedAtIso,
+                demo_expires_at: expiresAtIso,
+              },
+              {
+                onConflict: "id",
+              }
+            );
+
+        if (profileError) {
+          console.error(
+            `CHYBA PROFILU PRO ${demoRequest.email}:`,
+            profileError
+          );
+
+          failed++;
+          continue;
+        }
+
+        console.log(
+          `DEMO PROFIL VYTVOĹEN: ${demoRequest.email}`
+        );
+
+        // ========================================
+        // VYTVOĹENĂŤ SUPABASE PĹĂŤMĂ‰HO ODKAZU
+        // ========================================
+        //
+        // NEPOSĂŤLĂME E-MAIL.
+        //
+        // Supabase pouze vytvoĹ™Ă­ jednorĂˇzovĂ˝ odkaz,
+        // kterĂ˝ vrĂˇtĂ­me pĹ™Ă­mo v JSON odpovÄ›di.
+        //
+        // U novĂ©ho ĂşÄŤtu pouĹľijeme invite.
+        // U existujĂ­cĂ­ho ĂşÄŤtu pouĹľijeme magiclink.
+        // ========================================
+
+        const linkType = isNewUser
+          ? "invite"
+          : "magiclink";
+
+        const {
+          data: linkData,
+          error: linkError,
+        } =
+          await supabaseAdmin.auth.admin.generateLink({
+            type: linkType,
+            email: demoRequest.email,
+            options: {
+              redirectTo,
+            },
+          });
+
+        if (linkError) {
+          console.error(
+            `CHYBA VYTVOĹENĂŤ PĹĂŤMĂ‰HO ODKAZU PRO ${demoRequest.email}:`,
+            linkError
+          );
+
+          failed++;
+          continue;
+        }
+
+        const inviteUrl =
+          linkData.properties?.action_link;
+
+        if (!inviteUrl) {
+          console.error(
+            `SUPABASE NEVRĂTIL ACTION LINK PRO ${demoRequest.email}`
+          );
+
+          failed++;
+          continue;
+        }
+
+        console.log(
+          `PĹĂŤMĂť DEMO ODKAZ VYTVOĹEN PRO ${demoRequest.email}:`
+        );
+
+        console.log(inviteUrl);
+
+        // ========================================
+        // OZNAÄŚENĂŤ Ĺ˝ĂDOSTI JAKO AKTIVOVANĂ‰
+        // ========================================
+
+        const { error: updateError } =
+  await supabaseAdmin
+    .from("demo_requests")
+    .update({
+      user_id: userId,
+      approved_at: startedAtIso,
+    })
+    .eq("id", demoRequest.id)
+    .is("user_id", null)
+    .is("approved_at", null);
+
+        if (updateError) {
+          console.error(
+            `CHYBA AKTUALIZACE DEMO Ĺ˝ĂDOSTI ${demoRequest.id}:`,
+            updateError
+          );
+
+          failed++;
+          continue;
+        }
+
+        // ========================================
+        // ĂšSPÄšCH
+        // ========================================
+
+        processed++;
+
+        activations.push({
+          id: demoRequest.id,
+          email: demoRequest.email,
+          userId,
+          inviteUrl,
+          expiresAt: expiresAtIso,
+        });
+
+        console.log(
+          `DEMO AKTIVOVĂNO: ${demoRequest.email} | ` +
+            `od ${startedAtIso} | ` +
+            `do ${expiresAtIso}`
+        );
+      } catch (error) {
+        console.error(
+          `CHYBA ZPRACOVĂNĂŤ DEMO ${demoRequest.email}:`,
+          error
+        );
+
+        failed++;
+      }
+    }
+
+    // ============================================
+    // VĂťSLEDEK
+    // ============================================
+
+    return NextResponse.json({
+      success: failed === 0,
+      processed,
+      failed,
+      total: requests.length,
+      activations,
+    });
+  } catch (error) {
+    console.error(
+      "CHYBA DEMO ACTIVATION API:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "NepodaĹ™ilo se zpracovat DEMO aktivace.",
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      { status: 500 }
+    );
+  }
+}
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\statistics\route.ts
+============================================================
+export {};
+
+============================================================
+FILE: C:\Users\zamec\aegris-web\app\api\weather\route.ts
+============================================================
+import { NextRequest, NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+function numberOrNull(value: unknown): number | null {
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : null;
+}
+
+export async function GET(request: NextRequest) {
+  const latitude = Number(
+    request.nextUrl.searchParams.get("latitude")
+  );
+
+  const longitude = Number(
+    request.nextUrl.searchParams.get("longitude")
+  );
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return NextResponse.json(
+      {
+        error: "NeplatnĂ© souĹ™adnice projektu.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const url = new URL(
+    "https://api.open-meteo.com/v1/forecast"
+  );
+
+  url.searchParams.set(
+    "latitude",
+    String(latitude)
+  );
+
+  url.searchParams.set(
+    "longitude",
+    String(longitude)
+  );
+
+  url.searchParams.set(
+    "current",
+    [
+      "temperature_2m",
+      "relative_humidity_2m",
+      "precipitation",
+      "wind_speed_10m",
+      "soil_moisture_9_to_27cm",
+    ].join(",")
+  );
+
+  url.searchParams.set(
+    "hourly",
+    [
+      "precipitation",
+      "precipitation_probability",
+      "temperature_2m",
+      "soil_moisture_9_to_27cm",
+    ].join(",")
+  );
+
+  url.searchParams.set(
+    "daily",
+    [
+      "precipitation_sum",
+      "et0_fao_evapotranspiration",
+      "temperature_2m_min",
+      "temperature_2m_max",
+    ].join(",")
+  );
+
+  url.searchParams.set(
+    "forecast_days",
+    "2"
+  );
+
+  url.searchParams.set(
+    "timezone",
+    "auto"
+  );
+
+  url.searchParams.set(
+    "temperature_unit",
+    "celsius"
+  );
+
+  url.searchParams.set(
+    "wind_speed_unit",
+    "kmh"
+  );
+
+  url.searchParams.set(
+    "precipitation_unit",
+    "mm"
+  );
+
+  try {
+    const response = await fetch(
+      url.toString(),
+      {
+        next: {
+          revalidate: 900,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+
+      console.error(
+        "OPEN-METEO ERROR:",
+        text
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "PoÄŤasĂ­ se nepodaĹ™ilo naÄŤĂ­st.",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
+    const data = await response.json();
+
+    const current = data.current ?? {};
+    const hourly = data.hourly ?? {};
+    const daily = data.daily ?? {};
+
+    /*
+     * --------------------------------------------------
+     * HOURLY DATA
+     * --------------------------------------------------
+     */
+
+    const hourlyTimes: string[] =
+      Array.isArray(hourly.time)
+        ? hourly.time
+        : [];
+
+    const hourlyPrecipitation: unknown[] =
+      Array.isArray(hourly.precipitation)
+        ? hourly.precipitation
+        : [];
+
+    const hourlyTemperature: unknown[] =
+      Array.isArray(hourly.temperature_2m)
+        ? hourly.temperature_2m
+        : [];
+
+    const hourlyPrecipitationProbability: unknown[] =
+      Array.isArray(
+        hourly.precipitation_probability
+      )
+        ? hourly.precipitation_probability
+        : [];
+
+    const currentTime = String(
+      current.time ?? ""
+    );
+
+    let currentIndex =
+      hourlyTimes.findIndex(
+        (time) => time === currentTime
+      );
+
+    if (currentIndex < 0) {
+      currentIndex = 0;
+    }
+
+    /*
+     * --------------------------------------------------
+     * NEXT 24 HOURS
+     * --------------------------------------------------
+     */
+
+    const next24hPrecipitation =
+      hourlyPrecipitation
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
+        .map(numberOrNull)
+        .filter(
+          (value): value is number =>
+            value !== null
+        )
+        .reduce(
+          (sum, value) => sum + value,
+          0
+        );
+
+    const next24hTemperatures =
+      hourlyTemperature
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
+        .map(numberOrNull)
+        .filter(
+          (value): value is number =>
+            value !== null
+        );
+
+    const next24hPrecipitationProbability =
+      hourlyPrecipitationProbability
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
+        .map(numberOrNull)
+        .filter(
+          (value): value is number =>
+            value !== null
+        );
+
+    const next24hMinTemperature =
+      next24hTemperatures.length > 0
+        ? Math.min(
+            ...next24hTemperatures
+          )
+        : null;
+
+    const next24hMaxTemperature =
+      next24hTemperatures.length > 0
+        ? Math.max(
+            ...next24hTemperatures
+          )
+        : null;
+
+    const maxPrecipitationProbability =
+      next24hPrecipitationProbability.length >
+      0
+        ? Math.max(
+            ...next24hPrecipitationProbability
+          )
+        : null;
+
+    /*
+     * --------------------------------------------------
+     * DAILY DATA
+     * --------------------------------------------------
+     */
+
+    const dailyMin: unknown[] =
+      Array.isArray(
+        daily.temperature_2m_min
+      )
+        ? daily.temperature_2m_min
+        : [];
+
+    const dailyMax: unknown[] =
+      Array.isArray(
+        daily.temperature_2m_max
+      )
+        ? daily.temperature_2m_max
+        : [];
+
+    const dailyEvapotranspiration: unknown[] =
+      Array.isArray(
+        daily.et0_fao_evapotranspiration
+      )
+        ? daily.et0_fao_evapotranspiration
+        : [];
+
+    /*
+     * --------------------------------------------------
+     * CURRENT CONDITIONS
+     * --------------------------------------------------
+     */
+
+    const temperature =
+      numberOrNull(
+        current.temperature_2m
+      );
+
+    const humidity =
+      numberOrNull(
+        current.relative_humidity_2m
+      );
+
+    const precipitation =
+      numberOrNull(
+        current.precipitation
+      );
+
+    const wind =
+      numberOrNull(
+        current.wind_speed_10m
+      );
+
+    const soilMoistureRaw =
+      numberOrNull(
+        current.soil_moisture_9_to_27cm,
+      );
+
+    const soilMoisture =
+      soilMoistureRaw !== null
+        ? soilMoistureRaw * 100
+        : null;
+
+    /*
+     * --------------------------------------------------
+     * RESPONSE
+     *
+     * NĂˇzvy jsou schvĂˇlnÄ› ve formĂˇtu,
+     * kterĂ˝ oÄŤekĂˇvĂˇ page.tsx.
+     * --------------------------------------------------
+     */
+
+    return NextResponse.json({
+      latitude:
+        numberOrNull(data.latitude) ??
+        latitude,
+
+      longitude:
+        numberOrNull(data.longitude) ??
+        longitude,
+
+      timezone:
+        String(data.timezone ?? ""),
+
+      fetched_at:
+        String(
+          current.time ??
+            new Date().toISOString()
+        ),
+
+      temperature_c:
+        temperature,
+
+      humidity_pct:
+        humidity,
+
+      precipitation_mm:
+        precipitation,
+
+      wind_speed_kmh:
+        wind,
+
+      soil_moisture_pct:
+        soilMoisture,
+
+      evapotranspiration_mm:
+        numberOrNull(
+          dailyEvapotranspiration[0]
+        ),
+
+      precipitation_probability_pct:
+        maxPrecipitationProbability,
+
+      next24h_precipitation_mm:
+        next24hPrecipitation,
+
+      next24h_min_temperature_c:
+        next24hMinTemperature ??
+        numberOrNull(dailyMin[0]),
+
+      next24h_max_temperature_c:
+        next24hMaxTemperature ??
+        numberOrNull(dailyMax[0]),
+    });
+  } catch (error) {
+    console.error(
+      "WEATHER ROUTE ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "PoÄŤasĂ­ se nepodaĹ™ilo naÄŤĂ­st.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+
