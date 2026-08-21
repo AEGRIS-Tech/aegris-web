@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 
 const TOKEN_URL =
   "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
@@ -197,14 +198,26 @@ export async function GET(
       await supabase.auth.getUser();
 
     if (userError || !user) {
-      return NextResponse.json(
-        {
-          error:
-            "Uživatel není přihlášen.",
-        },
-        { status: 401 }
-      );
-    }
+  return NextResponse.json(
+    {
+      error:
+        "Uživatel není přihlášen.",
+    },
+    { status: 401 }
+  );
+}
+
+const serviceSupabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  }
+);
 
     // --------------------------------------------------
     // 2. PARAMETRY
@@ -772,6 +785,57 @@ export async function GET(
           b.from
         ).getTime()
     );
+
+    // --------------------------------------------------
+// 14. ULOŽENÍ NDVI HISTORIE
+// --------------------------------------------------
+
+if (
+  projectId !== null &&
+  Number.isFinite(projectId) &&
+  history.length > 0
+) {
+  const historyRows = history.map(
+    (item) => ({
+      project_id: projectId,
+      period_from: item.from,
+      period_to: item.to,
+      ndvi: item.ndvi,
+    })
+  );
+
+  const {
+    error: historyDeleteError,
+  } = await serviceSupabase
+    .from("ndvi_history")
+    .delete()
+    .eq("project_id", projectId);
+
+  if (historyDeleteError) {
+    console.error(
+      "CHYBA SMAZÁNÍ STARÉ NDVI HISTORIE:",
+      historyDeleteError
+    );
+  } else {
+    const {
+      error: historyInsertError,
+    } = await serviceSupabase
+      .from("ndvi_history")
+      .insert(historyRows);
+
+    if (historyInsertError) {
+      console.error(
+        "CHYBA ULOŽENÍ NDVI HISTORIE:",
+        historyInsertError
+      );
+    } else {
+      console.log(
+        "NDVI HISTORIE ULOŽENA:",
+        historyRows.length
+      );
+    }
+  }
+}
 
     // --------------------------------------------------
     // 15. AKTUÁLNÍ NDVI
