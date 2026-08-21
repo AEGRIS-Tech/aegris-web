@@ -12,10 +12,11 @@ export async function POST(request: Request) {
     const cronSecret = process.env.CRON_SECRET;
 
     if (!cronSecret) {
-      console.error("CHYBA: CRON_SECRET není nastavený.");
+      console.error("CRON_SECRET není nastavený.");
 
       return NextResponse.json(
         {
+          success: false,
           error: "Server není správně nakonfigurován.",
         },
         { status: 500 }
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     if (authorization !== `Bearer ${cronSecret}`) {
       return NextResponse.json(
         {
+          success: false,
           error: "Unauthorized",
         },
         { status: 401 }
@@ -58,7 +60,9 @@ export async function POST(request: Request) {
 
       return NextResponse.json(
         {
+          success: false,
           error: "Nepodařilo se načíst DEMO žádosti.",
+          details: requestsError.message,
         },
         { status: 500 }
       );
@@ -75,7 +79,7 @@ export async function POST(request: Request) {
     }
 
     // ============================================
-    // ZÁKLADNÍ URL APLIKACE
+    // URL APLIKACE
     // ============================================
 
     const appUrl =
@@ -88,25 +92,36 @@ export async function POST(request: Request) {
     let processed = 0;
     let failed = 0;
 
+    // Budeme vracet odkazy pro lokální test.
+    const activations: Array<{
+      id: number;
+      email: string;
+      userId: string;
+      inviteUrl: string;
+      expiresAt: string;
+    }> = [];
+
     // ============================================
-    // AKTIVACE JEDNOTLIVÝCH DEMO ŽÁDOSTÍ
+    // ZPRACOVÁNÍ DEMO ŽÁDOSTÍ
     // ============================================
 
     for (const demoRequest of requests) {
       try {
         let userId: string | null = null;
+        let isNewUser = false;
 
-        // ----------------------------------------
-        // KONTROLA, ZDA AUTH ÚČET UŽ EXISTUJE
-        // ----------------------------------------
+        // ========================================
+        // KONTROLA EXISTUJÍCÍHO AUTH ÚČTU
+        // ========================================
 
         const {
           data: usersData,
           error: usersError,
-        } = await supabaseAdmin.auth.admin.listUsers({
-          page: 1,
-          perPage: 1000,
-        });
+        } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
 
         if (usersError) {
           console.error(
@@ -118,15 +133,16 @@ export async function POST(request: Request) {
           continue;
         }
 
-        const existingUser = usersData.users.find(
-          (user) =>
-            user.email?.toLowerCase() ===
-            demoRequest.email.toLowerCase()
-        );
+        const existingUser =
+          usersData.users.find(
+            (user) =>
+              user.email?.toLowerCase() ===
+              demoRequest.email.toLowerCase()
+          );
 
-        // ----------------------------------------
+        // ========================================
         // EXISTUJÍCÍ UŽIVATEL
-        // ----------------------------------------
+        // ========================================
 
         if (existingUser) {
           userId = existingUser.id;
@@ -136,41 +152,37 @@ export async function POST(request: Request) {
           );
         }
 
-        // ----------------------------------------
-        // NOVÝ UŽIVATEL → POZVÁNKA
-        // ----------------------------------------
+        // ========================================
+        // NOVÝ UŽIVATEL
+        // ========================================
 
         if (!userId) {
           const {
-            data: inviteData,
-            error: inviteError,
+            data: userData,
+            error: userError,
           } =
-            await supabaseAdmin.auth.admin.inviteUserByEmail(
-              demoRequest.email,
-              {
-                data: {
-                  full_name:
-                    demoRequest.full_name,
-                  company:
-                    demoRequest.company,
-                  account_type: "demo",
-                },
-                redirectTo,
-              }
-            );
+            await supabaseAdmin.auth.admin.createUser({
+              email: demoRequest.email,
+              email_confirm: true,
+              user_metadata: {
+                full_name: demoRequest.full_name,
+                company: demoRequest.company,
+                account_type: "demo",
+              },
+            });
 
-          if (inviteError) {
+          if (userError) {
             console.error(
-              `CHYBA POZVÁNKY PRO ${demoRequest.email}:`,
-              inviteError
+              `CHYBA VYTVOŘENÍ ÚČTU PRO ${demoRequest.email}:`,
+              userError
             );
 
             failed++;
             continue;
           }
 
-          userId =
-            inviteData.user?.id ?? null;
+          userId = userData.user?.id ?? null;
+          isNewUser = true;
 
           if (!userId) {
             console.error(
@@ -180,11 +192,15 @@ export async function POST(request: Request) {
             failed++;
             continue;
           }
+
+          console.log(
+            `AUTH ÚČET VYTVOŘEN: ${demoRequest.email} | ${userId}`
+          );
         }
 
-        // ----------------------------------------
+        // ========================================
         // AKTIVACE 14DENNÍHO DEMO
-        // ----------------------------------------
+        // ========================================
 
         const startedAt = new Date();
 
@@ -197,9 +213,12 @@ export async function POST(request: Request) {
               1000
         );
 
-        // ----------------------------------------
-        // VYTVOŘENÍ / AKTIVACE PROFILU
-        // ----------------------------------------
+        const startedAtIso = startedAt.toISOString();
+        const expiresAtIso = expiresAt.toISOString();
+
+        // ========================================
+        // PROFIL
+        // ========================================
 
         const { error: profileError } =
           await supabaseAdmin
@@ -208,10 +227,8 @@ export async function POST(request: Request) {
               {
                 id: userId,
                 account_type: "demo",
-                demo_started_at:
-                  startedAt.toISOString(),
-                demo_expires_at:
-                  expiresAt.toISOString(),
+                demo_started_at: startedAtIso,
+                demo_expires_at: expiresAtIso,
               },
               {
                 onConflict: "id",
@@ -228,21 +245,81 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // ----------------------------------------
-        // OZNAČENÍ DEMO ŽÁDOSTI JAKO AKTIVOVANÉ
-        // ----------------------------------------
+        console.log(
+          `DEMO PROFIL VYTVOŘEN: ${demoRequest.email}`
+        );
+
+        // ========================================
+        // VYTVOŘENÍ SUPABASE PŘÍMÉHO ODKAZU
+        // ========================================
+        //
+        // NEPOSÍLÁME E-MAIL.
+        //
+        // Supabase pouze vytvoří jednorázový odkaz,
+        // který vrátíme přímo v JSON odpovědi.
+        //
+        // U nového účtu použijeme invite.
+        // U existujícího účtu použijeme magiclink.
+        // ========================================
+
+        const linkType = isNewUser
+          ? "invite"
+          : "magiclink";
+
+        const {
+          data: linkData,
+          error: linkError,
+        } =
+          await supabaseAdmin.auth.admin.generateLink({
+            type: linkType,
+            email: demoRequest.email,
+            options: {
+              redirectTo,
+            },
+          });
+
+        if (linkError) {
+          console.error(
+            `CHYBA VYTVOŘENÍ PŘÍMÉHO ODKAZU PRO ${demoRequest.email}:`,
+            linkError
+          );
+
+          failed++;
+          continue;
+        }
+
+        const inviteUrl =
+          linkData.properties?.action_link;
+
+        if (!inviteUrl) {
+          console.error(
+            `SUPABASE NEVRÁTIL ACTION LINK PRO ${demoRequest.email}`
+          );
+
+          failed++;
+          continue;
+        }
+
+        console.log(
+          `PŘÍMÝ DEMO ODKAZ VYTVOŘEN PRO ${demoRequest.email}:`
+        );
+
+        console.log(inviteUrl);
+
+        // ========================================
+        // OZNAČENÍ ŽÁDOSTI JAKO AKTIVOVANÉ
+        // ========================================
 
         const { error: updateError } =
-          await supabaseAdmin
-            .from("demo_requests")
-            .update({
-              user_id: userId,
-              approved_at:
-                startedAt.toISOString(),
-            })
-            .eq("id", demoRequest.id)
-            .is("user_id", null)
-            .is("approved_at", null);
+  await supabaseAdmin
+    .from("demo_requests")
+    .update({
+      user_id: userId,
+      approved_at: startedAtIso,
+    })
+    .eq("id", demoRequest.id)
+    .is("user_id", null)
+    .is("approved_at", null);
 
         if (updateError) {
           console.error(
@@ -254,12 +331,24 @@ export async function POST(request: Request) {
           continue;
         }
 
+        // ========================================
+        // ÚSPĚCH
+        // ========================================
+
         processed++;
+
+        activations.push({
+          id: demoRequest.id,
+          email: demoRequest.email,
+          userId,
+          inviteUrl,
+          expiresAt: expiresAtIso,
+        });
 
         console.log(
           `DEMO AKTIVOVÁNO: ${demoRequest.email} | ` +
-            `od ${startedAt.toISOString()} | ` +
-            `do ${expiresAt.toISOString()}`
+            `od ${startedAtIso} | ` +
+            `do ${expiresAtIso}`
         );
       } catch (error) {
         console.error(
@@ -271,11 +360,16 @@ export async function POST(request: Request) {
       }
     }
 
+    // ============================================
+    // VÝSLEDEK
+    // ============================================
+
     return NextResponse.json({
-      success: true,
+      success: failed === 0,
       processed,
       failed,
       total: requests.length,
+      activations,
     });
   } catch (error) {
     console.error(
@@ -285,8 +379,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
+        success: false,
         error:
           "Nepodařilo se zpracovat DEMO aktivace.",
+        details:
+          error instanceof Error
+            ? error.message
+            : String(error),
       },
       { status: 500 }
     );
