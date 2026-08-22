@@ -84,6 +84,13 @@ export type ScoreBreakdownItem = {
   contribution: number;
 };
 
+type DiagnosticCause = {
+  code: string;
+  label: string;
+  confidence: number;
+  evidence: string[];
+};
+
 export type ContextEvaluation = {
   level: "Optimální" | "Upozornění" | "Kritické" | "Bez vyhodnocení";
   priority: "Nízká" | "Střední" | "Vysoká" | "Kritická";
@@ -100,6 +107,7 @@ export type ContextEvaluation = {
   warningFactorCount: number;
   evaluatedFactorCount: number;
   dataCompletenessPct: number;
+  diagnoses: DiagnosticCause[];
   summary: string;
   recommendation: string;
   actions: string[];
@@ -360,6 +368,7 @@ export function evaluateProjectContext(
         "Spustit aktuální AI analýzu projektu.",
         "Zkontrolovat, že je vybraná plodina a růstová fáze.",
       ],
+      diagnoses: [],
       factors: [
         {
           label: "NDVI",
@@ -1320,6 +1329,119 @@ export function evaluateProjectContext(
   const hasLowNdvi =
     ndvi < target * 0.8;
 
+      // ---------------------------------------------------------
+  // Diagnostika pravděpodobné příčiny
+  // ---------------------------------------------------------
+
+  const diagnosticEvidence: DiagnosticCause[] = [];
+
+  const ndviFactor =
+    factors.find(
+      (factor) =>
+        factor.label === "NDVI"
+    );
+
+  const ndviTrendFactor =
+    factors.find(
+      (factor) =>
+        factor.label === "Trend NDVI"
+    );
+
+  const soilMoistureFactor =
+    factors.find(
+      (factor) =>
+        factor.label === "Vlhkost půdy"
+    );
+
+  const waterBalanceFactor =
+    factors.find(
+      (factor) =>
+        factor.label === "Vodní bilance"
+    );
+
+  const waterEvidence: string[] = [];
+
+  if (
+    ndviFactor &&
+    (
+      ndviFactor.status === "Upozornění" ||
+      ndviFactor.status === "Kritické"
+    )
+  ) {
+    waterEvidence.push(
+      `NDVI: ${ndviFactor.detail}`
+    );
+  }
+
+  if (
+    ndviTrendFactor &&
+    (
+      ndviTrendFactor.status === "Upozornění" ||
+      ndviTrendFactor.status === "Kritické"
+    )
+  ) {
+    waterEvidence.push(
+      `Trend NDVI: ${ndviTrendFactor.detail}`
+    );
+  }
+
+  if (
+    soilMoistureFactor &&
+    (
+      soilMoistureFactor.status === "Upozornění" ||
+      soilMoistureFactor.status === "Kritické"
+    )
+  ) {
+    waterEvidence.push(
+      `Vlhkost půdy: ${soilMoistureFactor.detail}`
+    );
+  }
+
+  if (
+    waterBalanceFactor &&
+    (
+      waterBalanceFactor.status === "Upozornění" ||
+      waterBalanceFactor.status === "Kritické"
+    )
+  ) {
+    waterEvidence.push(
+      `Vodní bilance: ${waterBalanceFactor.detail}`
+    );
+  }
+
+  if (
+    waterEvidence.length >= 2
+  ) {
+    const criticalWaterFactors =
+      [
+        ndviFactor,
+        ndviTrendFactor,
+        soilMoistureFactor,
+        waterBalanceFactor,
+      ].filter(
+        (factor) =>
+          factor?.status === "Kritické"
+      ).length;
+
+    const confidence =
+      Math.min(
+        0.95,
+        0.55 +
+          waterEvidence.length *
+            0.10 +
+          criticalWaterFactors *
+            0.05
+      );
+
+    diagnosticEvidence.push({
+      code: "WATER_STRESS",
+      label: "Pravděpodobný vodní stres",
+      confidence,
+      evidence:
+        waterEvidence.slice(0, 4),
+    });
+  }
+
   const hasWaterWarning =
     factors.some(
       (factor) =>
@@ -1804,6 +1926,12 @@ export function evaluateProjectContext(
         ) / totalWeight
       : 0;
 
+      console.log("AEGRIS SCORE DEBUG", {
+        availableFactors,
+        totalWeight,
+        weightedScore,
+      });
+
   const score =
     Math.round(
       clampScore(weightedScore)
@@ -1923,6 +2051,22 @@ export function evaluateProjectContext(
     );
   }
 
+  const prioritizedActions = [
+    ...(hasWaterWarning
+      ? [
+          "Prověřit vodní režim porostu a skutečnou půdní vlhkost v terénu.",
+        ]
+      : []),
+
+    ...(level === "Kritické"
+      ? [
+          "Provést prioritní terénní kontrolu porostu před rozhodnutím o zásahu.",
+        ]
+      : []),
+
+    ...actions,
+  ];
+
   const priority:
     ContextEvaluation["priority"] =
     level === "Kritické"
@@ -1952,8 +2096,9 @@ export function evaluateProjectContext(
     summary,
     recommendation,
     actions: Array.from(
-      new Set(actions)
+      new Set(prioritizedActions)
     ).slice(0, 5),
+    diagnoses: diagnosticEvidence,
     factors,
   };
 }

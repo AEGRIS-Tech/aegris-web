@@ -197,9 +197,20 @@ if (soilProfileError) {
 }
     console.log("AEGRIS LOAD PROJECT: BEFORE WEATHER");
 
-    await loadWeather(currentProject.latitude, currentProject.longitude);
+try {
+  await loadWeather(
+    currentProject.latitude,
+    currentProject.longitude
+  );
+} catch (error) {
+  console.error(
+    "AEGRIS WEATHER LOAD FAILED:",
+    error
+  );
+}
 
-    console.log("AEGRIS LOAD PROJECT: AFTER WEATHER");
+console.log("AEGRIS LOAD PROJECT: AFTER WEATHER");
+console.log("AEGRIS LOAD PROJECT: BEFORE ANALYSIS QUERY");
 
     setCropName(currentProject.crop_name ?? "");
     setCropVariety(currentProject.crop_variety ?? "");
@@ -234,6 +245,12 @@ console.log("AEGRIS LOAD ANALYSIS", {
   projectId: currentProject.id,
   lastAnalysis,
   analysisError,
+});
+
+console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
+  hasAnalysis: !!lastAnalysis,
+  analysisId: lastAnalysis?.id ?? null,
+  analysisNdvi: lastAnalysis?.ndvi ?? null,
 });
 
     if (analysisError) {
@@ -338,12 +355,19 @@ if (ndviHistoryError) {
   // This effect intentionally loads remote project data and updates React state.
   // The react-hooks/set-state-in-effect rule is not applicable to this data-fetching effect.
   /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    loadProject();
-    loadCropProfiles();
-    loadCropStageProfiles();
-  }, [loadProject]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+useEffect(() => {
+  console.log("AEGRIS EFFECT: START", {
+    projectId: params.id,
+  });
+
+  void loadProject();
+
+  void loadCropProfiles();
+  void loadCropStageProfiles();
+
+  console.log("AEGRIS EFFECT: STARTED");
+}, [params.id]);
+/* eslint-enable react-hooks/set-state-in-effect */
 
   async function loadWeather(latitude: number, longitude: number) {
   console.log("AEGRIS WEATHER: START", {
@@ -982,6 +1006,7 @@ const {
   criticalFactorCount: contextEvaluation.criticalFactorCount,
   warningFactorCount: contextEvaluation.warningFactorCount,
   evaluatedFactorCount: contextEvaluation.evaluatedFactorCount,
+  diagnoses: contextEvaluation.diagnoses,
   dataCompletenessPct: contextEvaluation.dataCompletenessPct,
   scoreBreakdown: contextEvaluation.scoreBreakdown,
   factors: contextEvaluation.factors,
@@ -1179,7 +1204,53 @@ const {
                 <div key={`decision-${index}`} className="flex gap-2 rounded-lg bg-[#061022] p-2 text-[11px] leading-4 text-slate-400"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500/10 font-black text-cyan-400">{index + 1}</span>{action}</div>
               ))}
             </div>
-            <div className="mt-3 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.03] p-3 text-xs font-bold text-slate-200">DALŠÍ KROK<br /><span className="text-sm">Zkontrolovat porost a pokračovat v monitoringu.</span></div>
+                        {contextEvaluation.diagnoses.length > 0 && (
+              <div className="mt-4 rounded-lg border border-orange-500/20 bg-orange-500/[0.03] p-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-orange-400">
+                  PRAVDĚPODOBNÁ PŘÍČINA
+                </div>
+
+                <div className="mt-2 space-y-2">
+                  {contextEvaluation.diagnoses.map((diagnosis) => (
+                    <div
+                      key={diagnosis.code}
+                      className="rounded-lg bg-[#061022] p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-black text-slate-200">
+                          {diagnosis.label}
+                        </div>
+
+                        <span className="shrink-0 rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-1 text-[9px] font-black text-orange-400">
+                          {Math.round(diagnosis.confidence * 100)} %
+                        </span>
+                      </div>
+
+                      {diagnosis.evidence.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {diagnosis.evidence.map((evidence, evidenceIndex) => (
+                            <div
+                              key={`${diagnosis.code}-evidence-${evidenceIndex}`}
+                              className="flex gap-2 text-[9px] leading-4 text-slate-500"
+                            >
+                              <span className="text-orange-400">•</span>
+                              <span>{evidence}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-3 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.03] p-3 text-xs font-bold text-slate-200">
+  DALŠÍ KROK
+  <br />
+  <span className="text-sm">
+    {contextEvaluation.recommendation}
+  </span>
+</div>
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-[#071225]/90 p-4 xl:col-span-4">
@@ -1207,10 +1278,111 @@ const {
           </div>
         </section>
 
+        {/* AEGRIS DIAGNOSTICS */}
+{contextEvaluation.diagnoses.length > 0 && (
+  <section className="mt-3 rounded-xl border border-red-500/20 bg-[#071225]/90 p-4">
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-400">
+          AEGRIS DIAGNOSTIKA
+        </div>
+
+        <h2 className="mt-1 text-sm font-black text-white">
+          Pravděpodobné příčiny aktuálního rizika
+        </h2>
+      </div>
+
+      <span className="rounded-lg border border-red-500/20 bg-red-500/5 px-2 py-1 text-[9px] font-bold text-red-400">
+        {contextEvaluation.diagnoses.length}{" "}
+        {contextEvaluation.diagnoses.length === 1
+          ? "diagnóza"
+          : "diagnózy"}
+      </span>
+    </div>
+
+    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      {contextEvaluation.diagnoses.map((diagnosis) => (
+        <div
+          key={diagnosis.code}
+          className="rounded-lg border border-slate-800 bg-[#061022] p-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-white">
+                {diagnosis.label}
+              </div>
+
+              <div className="mt-1 text-[9px] uppercase tracking-widest text-slate-500">
+                Confidence
+              </div>
+            </div>
+
+            <div className="text-lg font-black text-red-400">
+              {Math.round(diagnosis.confidence * 100)} %
+            </div>
+          </div>
+
+          {diagnosis.evidence.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {diagnosis.evidence.map((evidence, index) => (
+                <div
+                  key={`${diagnosis.code}-evidence-${index}`}
+                  className="flex gap-2 rounded-md bg-[#07172b] p-2 text-[10px] leading-4 text-slate-400"
+                >
+                  <span className="mt-0.5 text-cyan-400">•</span>
+                  <span>{evidence}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-400">
+              Podpůrné faktory
+            </div>
+
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {contextEvaluation.scoreBreakdown.map((item) => (
+                <div
+                  key={`${diagnosis.code}-${item.label}`}
+                  className="rounded-md border border-slate-800 bg-[#071225] p-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-semibold text-slate-400">
+                      {item.label}
+                    </span>
+
+                    <span className="text-[9px] font-black text-cyan-400">
+                      {item.score}/100
+                    </span>
+                  </div>
+
+                  <div className="mt-1 text-[8px] text-slate-600">
+                    Váha {item.weight} %
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+)}
+
         {/* FACTOR CARDS */}
         <section className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           {contextEvaluation.factors.slice(0, 8).map((factor, index) => {
-            const scoreItem = contextEvaluation.scoreBreakdown.find((item) => item.label === factor.label);
+            const scoreItem = contextEvaluation.scoreBreakdown.find(
+              (item) => item.label === factor.label
+            );
+
+          console.log("AEGRIS UI FACTOR DEBUG", {
+           factor: factor.label,
+           factorDetail: factor.detail,
+          scoreItem,
+         });
+            
             return (
               <div key={`${factor.label}-${index}`} className="min-h-[145px] rounded-lg border border-slate-800 bg-[#071225]/90 p-3">
                 <div className="text-[9px] font-semibold leading-4 text-slate-400">{factor.label}</div>
