@@ -883,3 +883,24 @@ describe("AEGRIS Decision Engine — integrační scénáře", () => {
     );
   });
 });
+describe("AEGRIS Decision Engine — prioritizace akcí", () => {
+  it("kritický stav přidá prioritní terénní kontrolu", () => {
+    const result = evaluate({
+      ndvi: 0.10,
+      weather: {
+        soil_moisture_pct: 5,
+        next24h_precipitation_mm: 0,
+        evapotranspiration_mm: 6,
+        temperature_c: 40,
+        next24h_min_temperature_c: 5,
+        next24h_max_temperature_c: 40,
+      },
+    });
+
+    expect(result.level).toBe("Kritické");
+
+    expect(result.actions).toContain(
+      "Provést prioritní terénní kontrolu porostu před rozhodnutím o zásahu."
+    );
+  });
+});

@@ -184,6 +184,12 @@ export default function ProjectDetailPage() {
   .eq("project_id", currentProject.id)
   .maybeSingle();
 
+  console.log("AEGRIS SOIL QUERY:", {
+  projectId: currentProject.id,
+  data: soilProfileData,
+  error: soilProfileError,
+});
+
 if (soilProfileError) {
   console.error(
     "CHYBA NAČTENÍ PŮDNÍHO PROFILU:",
@@ -195,6 +201,7 @@ if (soilProfileError) {
     (soilProfileData ?? null) as ProjectSoilProfile | null
   );
 }
+    console.log("AEGRIS SOIL PROFILE:", soilProfileData);
     console.log("AEGRIS LOAD PROJECT: BEFORE WEATHER");
 
 try {
