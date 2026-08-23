@@ -192,168 +192,99 @@ await loadProjects(user.id);
   // =========================================================
 
   async function runAIAnalysis() {
-    if (!selectedProject.id) {
-      setAnalysisError(
-        "Není vybrán žádný projekt."
-      );
-      return;
-    }
-
-    setAnalysisLoading(true);
-    setAnalysisError("");
-
-    try {
-      const {
-        data: ndviData,
-        error: ndviError,
-      } = await supabase
-        .from("ndvi_history")
-        .select(
-          "ndvi, period_from, period_to, created_at"
-        )
-        .eq(
-          "project_id",
-          selectedProject.id
-        )
-        .order("period_to", {
-          ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
-
-      if (ndviError) {
-        console.error(
-          "CHYBA NAČTENÍ NDVI:",
-          ndviError
-        );
-
-        throw new Error(
-          "Nepodařilo se načíst NDVI data."
-        );
-      }
-
-      if (!ndviData) {
-        throw new Error(
-          "Pro tento projekt zatím nejsou k dispozici žádná NDVI data."
-        );
-      }
-
-      const ndvi = Number(
-        ndviData.ndvi
-      );
-
-      if (!Number.isFinite(ndvi)) {
-        throw new Error(
-          "NDVI hodnota není platné číslo."
-        );
-      }
-
-      // Vegetace
-      let vegetation = 0;
-
-      if (ndvi < 0.2) {
-        vegetation = 20;
-      } else if (ndvi < 0.4) {
-        vegetation = 40;
-      } else if (ndvi < 0.6) {
-        vegetation = 60;
-      } else if (ndvi < 0.8) {
-        vegetation = 80;
-      } else {
-        vegetation = 90;
-      }
-
-      // Riziko
-      let risk = "Nízké";
-
-      if (ndvi < 0.2) {
-        risk = "Vysoké";
-      } else if (ndvi < 0.4) {
-        risk = "Střední";
-      }
-
-      // Uložení analýzy
-      const {
-        data: savedAnalysis,
-        error: analysisError,
-      } = await supabase
-        .from("analysis")
-        .insert([
-          {
-            project_id:
-              selectedProject.id,
-            ndvi,
-            vegetation,
-            risk,
-          },
-        ])
-        .select(
-          "ndvi, vegetation, risk, created_at"
-        )
-        .single();
-
-      if (analysisError) {
-        console.error(
-          "CHYBA ULOŽENÍ ANALÝZY:",
-          analysisError
-        );
-
-        throw new Error(
-          "NDVI se načetlo, ale výsledek se nepodařilo uložit do analysis."
-        );
-      }
-
-      setAnalysis({
-        ndvi: Number(
-          savedAnalysis.ndvi
-        ),
-        vegetation: Number(
-          savedAnalysis.vegetation
-        ),
-        risk: String(
-          savedAnalysis.risk
-        ),
-        created_at:
-          savedAnalysis.created_at,
-      });
-    } catch (error) {
-      console.error(
-        "AI ANALÝZA CHYBA:",
-        error
-      );
-
-      if (error instanceof Error) {
-        setAnalysisError(
-          error.message
-        );
-      } else {
-        setAnalysisError(
-          "Analýza se nepodařila dokončit."
-        );
-      }
-    } finally {
-      setAnalysisLoading(false);
-    }
+  if (!selectedProject.id) {
+    setAnalysisError("Není vybrán žádný projekt.");
+    return;
   }
 
-  // =========================================================
+  setAnalysisLoading(true);
+  setAnalysisError("");
+
+  try {
+    const response = await fetch(
+      `/api/analysis?projectId=${selectedProject.id}`,
+      {
+        method: "GET",
+        cache: "no-store",
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      console.error("ANALÝZA API CHYBA:", result);
+
+      throw new Error(
+        result?.error ||
+          "Analýzu se nepodařilo dokončit."
+      );
+    }
+
+    const ndvi =
+      result?.currentNdvi ??
+      result?.ndvi ??
+      null;
+
+    if (
+      ndvi === null ||
+      !Number.isFinite(Number(ndvi))
+    ) {
+      throw new Error(
+        "API analýzy nevrátilo platnou NDVI hodnotu."
+      );
+    }
+
+    setAnalysis({
+      ndvi: Number(ndvi),
+
+      // Dashboard zatím zachovává původní datový model.
+      // Skutečné rozhodnutí nyní vzniká v decision engine.
+      vegetation: Math.round(
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(ndvi) * 100
+          )
+        )
+      ),
+
+      risk:
+        result?.risk ??
+        "Vyhodnoceno",
+
+      created_at:
+        new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(
+      "AI ANALÝZA CHYBA:",
+      error
+    );
+
+    setAnalysisError(
+      error instanceof Error
+        ? error.message
+        : "Analýza se nepodařila dokončit."
+    );
+  } finally {
+    setAnalysisLoading(false);
+  }
+}
+
+// =========================================================
   // SELECT PROJECT
   // =========================================================
 
-  async function selectProject(
-    project: Project
-  ) {
+  async function selectProject(project: Project) {
     setSelectedProject(project);
     setAnalysis(null);
     setAnalysisError("");
 
     if (project.id) {
-      await loadLatestAnalysis(
-        project.id
-      );
+      await loadLatestAnalysis(project.id);
     }
   }
-
   // =========================================================
   // LOGOUT
   // =========================================================

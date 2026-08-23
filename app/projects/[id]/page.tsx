@@ -30,6 +30,8 @@ type Analysis = {
   vegetation: number;
   risk: string;
   created_at: string;
+  period_from?: string | null;
+  period_to?: string | null;
 };
 
 import {
@@ -104,6 +106,7 @@ export default function ProjectDetailPage() {
   const [savingCrop, setSavingCrop] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const analysisRunRef = useRef(false);
+  const loadRequestRef = useRef(0);
 
   async function loadCropProfiles() {
     const { data, error } = await supabase
@@ -116,6 +119,7 @@ export default function ProjectDetailPage() {
         "CHYBA NAČTENÍ PROFILŮ PLODIN:",
         error
       );
+      setCropProfiles([]);
       return;
     }
 
@@ -144,6 +148,7 @@ export default function ProjectDetailPage() {
   }
 
   const loadProject = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     const projectId = Number(params.id);
 
     if (!Number.isFinite(projectId)) {
@@ -173,7 +178,15 @@ export default function ProjectDetailPage() {
 
     const currentProject = projectData as Project;
 
+    if (requestId !== loadRequestRef.current) return;
+
     setProject(currentProject);
+    setAnalysis(null);
+    setHistory([]);
+    setRecommendationHistory([]);
+    setAlerts([]);
+    setNdviHistory([]);
+    setWeather(null);
 
     const {
   data: soilProfileData,
@@ -183,12 +196,6 @@ export default function ProjectDetailPage() {
   .select("*")
   .eq("project_id", currentProject.id)
   .maybeSingle();
-
-  console.log("AEGRIS SOIL QUERY:", {
-  projectId: currentProject.id,
-  data: soilProfileData,
-  error: soilProfileError,
-});
 
 if (soilProfileError) {
   console.error(
@@ -201,8 +208,6 @@ if (soilProfileError) {
     (soilProfileData ?? null) as ProjectSoilProfile | null
   );
 }
-    console.log("AEGRIS SOIL PROFILE:", soilProfileData);
-    console.log("AEGRIS LOAD PROJECT: BEFORE WEATHER");
 
 try {
   await loadWeather(
@@ -216,8 +221,7 @@ try {
   );
 }
 
-console.log("AEGRIS LOAD PROJECT: AFTER WEATHER");
-console.log("AEGRIS LOAD PROJECT: BEFORE ANALYSIS QUERY");
+if (requestId !== loadRequestRef.current) return;
 
     setCropName(currentProject.crop_name ?? "");
     setCropVariety(currentProject.crop_variety ?? "");
@@ -248,25 +252,16 @@ console.log("AEGRIS LOAD PROJECT: BEFORE ANALYSIS QUERY");
   .limit(1)
   .maybeSingle();
 
-console.log("AEGRIS LOAD ANALYSIS", {
-  projectId: currentProject.id,
-  lastAnalysis,
-  analysisError,
-});
-
-console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
-  hasAnalysis: !!lastAnalysis,
-  analysisId: lastAnalysis?.id ?? null,
-  analysisNdvi: lastAnalysis?.ndvi ?? null,
-});
+    if (requestId !== loadRequestRef.current) return;
 
     if (analysisError) {
       console.error(
         "CHYBA NAČTENÍ POSLEDNÍ ANALÝZY:",
         analysisError
       );
-    } else if (lastAnalysis) {
-      setAnalysis(lastAnalysis);
+      setAnalysis(null);
+    } else {
+      setAnalysis(lastAnalysis ?? null);
     }
 
     const {
@@ -280,11 +275,14 @@ console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
         ascending: false,
       });
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (historyError) {
       console.error(
         "CHYBA NAČTENÍ ANALÝZ:",
         historyError
       );
+      setHistory([]);
     } else {
       setHistory(historyData ?? []);
     }
@@ -297,6 +295,8 @@ console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
       .select("*")
       .eq("project_id", currentProject.id)
       .order("created_at", { ascending: false });
+
+    if (requestId !== loadRequestRef.current) return;
 
     if (recommendationError) {
       console.error(
@@ -321,6 +321,8 @@ console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
   .order("created_at", { ascending: false })
   .limit(20);
 
+    if (requestId !== loadRequestRef.current) return;
+
     if (alertError) {
       console.error(
         "CHYBA NAČTENÍ ALERTŮ AEGRIS:",
@@ -342,45 +344,61 @@ console.log("AEGRIS LOAD ANALYSIS: AFTER QUERY", {
     ascending: true,
   });
 
-console.log("AEGRIS NDVI HISTORY LOAD:", {
-  projectId: currentProject.id,
-  count: ndviHistoryData?.length ?? 0,
-  data: ndviHistoryData,
-  error: ndviHistoryError,
-});
+if (requestId !== loadRequestRef.current) return;
 
-if (ndviHistoryError) {
-  console.error(
-    "CHYBA NAČTENÍ NDVI HISTORIE:",
-    ndviHistoryError
-  );
-} else {
-  setNdviHistory(ndviHistoryData ?? []);
-}
+    const fallbackNdviHistory: NdviHistory[] =
+      (historyData ?? [])
+        .map((item) => {
+          const ndvi = Number(item.ndvi);
+          if (!Number.isFinite(ndvi)) return null;
+
+          const periodFrom =
+            item.period_from ?? item.created_at;
+          const periodTo =
+            item.period_to ?? item.created_at;
+
+          if (!periodFrom || !periodTo) return null;
+
+          return {
+            id: item.id,
+            project_id: item.project_id,
+            period_from: periodFrom,
+            period_to: periodTo,
+            ndvi,
+            created_at: item.created_at,
+          };
+        })
+        .filter(
+          (item): item is NdviHistory =>
+            item !== null
+        );
+
+    if (ndviHistoryError) {
+      console.error(
+        "CHYBA NAČTENÍ NDVI HISTORIE:",
+        ndviHistoryError
+      );
+      setNdviHistory(fallbackNdviHistory);
+    } else if ((ndviHistoryData ?? []).length > 0) {
+      setNdviHistory(ndviHistoryData ?? []);
+    } else {
+      setNdviHistory(fallbackNdviHistory);
+    }
   }, [params.id]);
 
   // This effect intentionally loads remote project data and updates React state.
   // The react-hooks/set-state-in-effect rule is not applicable to this data-fetching effect.
   /* eslint-disable react-hooks/set-state-in-effect */
 useEffect(() => {
-  console.log("AEGRIS EFFECT: START", {
-    projectId: params.id,
-  });
 
   void loadProject();
 
   void loadCropProfiles();
   void loadCropStageProfiles();
-
-  console.log("AEGRIS EFFECT: STARTED");
 }, [params.id]);
 /* eslint-enable react-hooks/set-state-in-effect */
 
   async function loadWeather(latitude: number, longitude: number) {
-  console.log("AEGRIS WEATHER: START", {
-    latitude,
-    longitude,
-  });
 
   setLoadingWeather(true);
 
@@ -466,19 +484,6 @@ const soilMoisture =
       source?.evapotranspiration_mm
     );
 
-    console.log("AEGRIS WEATHER DATA:", {
-      temperature,
-      humidity,
-      precipitation,
-      wind,
-      soilMoisture,
-      precipitationProbability,
-      next24hPrecipitation,
-      next24hMinTemperature,
-      next24hMaxTemperature,
-      evapotranspiration,
-    });
-
     setWeather({
       temperature_c: temperature,
       humidity_pct: humidity,
@@ -497,14 +502,11 @@ const soilMoisture =
         evapotranspiration,
       fetched_at: new Date().toISOString(),
     });
-
-  console.log("AEGRIS WEATHER: STATE SET");
   } catch (error) {
     console.error("CHYBA POČASÍ:", error);
     setWeather(null);
   } finally {
     setLoadingWeather(false);
-    console.log("AEGRIS WEATHER: FINALLY");
   }
 }
 
@@ -597,64 +599,64 @@ setAreaError("");
 
       const ndvi = Number(result.ndvi);
 
-      console.log("AEGRIS ANALYSIS API RESULT:", {
-  from: result.from,
-  to: result.to,
-  ndvi: result.ndvi,
-  historyCount: Array.isArray(result.history)
-    ? result.history.length
-    : "NOT_ARRAY",
-  lastHistoryItem:
-    Array.isArray(result.history) && result.history.length > 0
-      ? result.history[result.history.length - 1]
-      : null,
-});
+const freshNdviHistory: NdviHistory[] =
+        Array.isArray(result.history)
+          ? result.history
+              .map((item: unknown) => {
+                if (
+                  item === null ||
+                  typeof item !== "object"
+                ) {
+                  return null;
+                }
 
-const freshNdviHistory =
-  Array.isArray(result.history)
-    ? result.history
-        .map(
-          (
-            item: unknown
-          ) => {
-            if (
-              item === null ||
-              typeof item !== "object"
-            ) {
-              return null;
-            }
+                const candidate =
+                  item as Record<string, unknown>;
 
-            const candidate =
-              item as Record<string, unknown>;
+                const periodFrom =
+                  typeof candidate.from === "string"
+                    ? candidate.from
+                    : null;
 
-            if (
-              typeof candidate.from !== "string" ||
-              typeof candidate.to !== "string" ||
-              typeof candidate.ndvi !== "number"
-            ) {
-              return null;
-            }
+                const periodTo =
+                  typeof candidate.to === "string"
+                    ? candidate.to
+                    : null;
 
-            return {
-              id: 0,
-              project_id: project.id,
-              period_from: candidate.from,
-              period_to: candidate.to,
-              ndvi: candidate.ndvi,
-              created_at:
-                new Date().toISOString(),
-            };
-          }
-        )
-        .filter(
-  (
-    item: unknown
-  ): item is NdviHistory =>
-    item !== null
-)
-    : [];
+                const historyNdvi = Number(
+                  candidate.ndvi
+                );
 
-  setNdviHistory(freshNdviHistory);
+                if (
+                  !periodFrom ||
+                  !periodTo ||
+                  !Number.isFinite(historyNdvi)
+                ) {
+                  return null;
+                }
+
+                return {
+                  id: 0,
+                  project_id: project.id,
+                  period_from: periodFrom,
+                  period_to: periodTo,
+                  ndvi: historyNdvi,
+                  created_at:
+                    new Date().toISOString(),
+                };
+              })
+              .filter(
+                (item: NdviHistory | null): item is NdviHistory =>
+                  item !== null
+              )
+          : [];
+
+      const effectiveNdviHistory =
+        freshNdviHistory.length > 0
+          ? freshNdviHistory
+          : ndviHistory;
+
+      setNdviHistory(effectiveNdviHistory);
 
       if (!Number.isFinite(ndvi)) {
         console.error(
@@ -677,7 +679,7 @@ const freshNdviHistory =
         selectedCropStageProfile,
         growthStage,
         weather,
-        freshNdviHistory,
+        effectiveNdviHistory,
         analysisCreatedAt,
         soilProfile
       );
@@ -881,7 +883,6 @@ const {
         }
       }
 
-      await loadProject();
     } catch (error) {
       console.error(
         "CHYBA ANALÝZY:",
@@ -993,31 +994,6 @@ const {
     analysis?.created_at ?? null,
     soilProfile
   );
-
-  console.log("AEGRIS INPUT STATE", {
-  analysis,
-  analysisNdvi: analysis?.ndvi,
-  weather,
-  ndviHistoryCount: ndviHistory.length,
-  selectedCropProfile,
-  selectedCropStageProfile,
-  growthStage,
-  soilProfile,
-});
-
-  console.log("AEGRIS CONTEXT RESULT", {
-  score: contextEvaluation.score,
-  scoreLevel: contextEvaluation.scoreLevel,
-  level: contextEvaluation.level,
-  priority: contextEvaluation.priority,
-  criticalFactorCount: contextEvaluation.criticalFactorCount,
-  warningFactorCount: contextEvaluation.warningFactorCount,
-  evaluatedFactorCount: contextEvaluation.evaluatedFactorCount,
-  diagnoses: contextEvaluation.diagnoses,
-  dataCompletenessPct: contextEvaluation.dataCompletenessPct,
-  scoreBreakdown: contextEvaluation.scoreBreakdown,
-  factors: contextEvaluation.factors,
-});
 
   const priorityClass =
     contextEvaluation.priority === "Kritická"
@@ -1383,12 +1359,6 @@ const {
             const scoreItem = contextEvaluation.scoreBreakdown.find(
               (item) => item.label === factor.label
             );
-
-          console.log("AEGRIS UI FACTOR DEBUG", {
-           factor: factor.label,
-           factorDetail: factor.detail,
-          scoreItem,
-         });
             
             return (
               <div key={`${factor.label}-${index}`} className="min-h-[145px] rounded-lg border border-slate-800 bg-[#071225]/90 p-3">

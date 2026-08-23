@@ -238,17 +238,33 @@ export function calculateNdviTrend(
   );
 
   const historical = canonical.filter(
-    (item) => !(item.id === -1)
+  (item) => !(item.id === -1)
+);
+
+// Pokud je poslední historický záznam stejné měření
+// jako aktuální NDVI, nesmí být použit jako previousNdvi.
+// Aktuální měření už přidáváme níže samostatně.
+const historicalWithoutCurrent =
+  historical.filter(
+    (item) =>
+      Math.abs(
+        Number(item.ndvi) - currentNdvi
+      ) >= 0.0005
   );
 
-  const previousNdvi = historical.length
-    ? Number(historical[historical.length - 1].ndvi)
+const previousNdvi =
+  historicalWithoutCurrent.length
+    ? Number(
+        historicalWithoutCurrent[
+          historicalWithoutCurrent.length - 1
+        ].ndvi
+      )
     : null;
 
-  const values = historical
-    .slice(-5)
-    .map((item) => Number(item.ndvi))
-    .concat(currentNdvi);
+const values = historicalWithoutCurrent
+  .slice(-5)
+  .map((item) => Number(item.ndvi))
+  .concat(currentNdvi);
 
   if (values.length < 2) {
     return {
@@ -1647,6 +1663,17 @@ export function evaluateProjectContext(
         relativeScore * 0.6 +
         slopeScore * 0.4
       );
+console.log("AEGRIS TREND SCORE DEBUG", {
+  trendHistory: trendHistory.map((item) => Number(item.ndvi)),
+  ndvi,
+  values,
+  first,
+  relativeChangePct,
+  relativeScore,
+  slope,
+  slopeScore,
+  continuousTrendScore,
+});
   } else if (
     previousNdvi != null &&
     Number.isFinite(previousNdvi)
