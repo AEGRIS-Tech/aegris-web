@@ -207,7 +207,12 @@ export async function GET(
   );
 }
 
-const serviceSupabase = createClient(
+    // --------------------------------------------------
+    // 1A. ANALYSIS RATE LIMIT
+    // 5 analýz / 10 minut / uživatel
+    // --------------------------------------------------
+
+    const serviceSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   {
@@ -218,6 +223,62 @@ const serviceSupabase = createClient(
     },
   }
 );
+
+const {
+  data: rateLimitResult,
+  error: rateLimitError,
+} = await serviceSupabase.rpc(
+  "consume_analysis_rate_limit",
+  {
+    p_user_id: user.id,
+    p_limit: 5,
+    p_window_seconds: 600,
+  }
+);
+
+    if (rateLimitError) {
+      console.error(
+        "ANALYSIS RATE LIMIT ERROR:",
+        rateLimitError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Nepodařilo se ověřit limit analýz.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const rateLimit = Array.isArray(
+      rateLimitResult
+    )
+      ? rateLimitResult[0]
+      : rateLimitResult;
+
+    if (!rateLimit?.allowed) {
+      const retryAfter =
+        Number(
+          rateLimit?.retry_after_seconds
+        ) || 600;
+
+      return NextResponse.json(
+        {
+          error:
+            "Dosáhli jste limitu analýz. Zkuste to znovu později.",
+          retryAfterSeconds:
+            retryAfter,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After":
+              String(retryAfter),
+          },
+        }
+      );
+    }
 
     // --------------------------------------------------
     // 2. PARAMETRY

@@ -1200,7 +1200,7 @@ const {
             <div className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-400">CO SE DĚJE</div>
             <h3 className="mt-2 text-xl font-black">{decisionTitle}</h3>
             <p className="mt-2 text-xs leading-5 text-slate-400">{contextEvaluation.summary}</p>
-            <div className="mt-3 grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">NDVI</div><div className="mt-1 text-lg font-black text-cyan-400">{currentNdvi?.toFixed(3) ?? "—"}</div></div>
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">TREND</div><div className={`mt-1 text-sm font-black ${recommendationTrend.className}`}>{recommendationTrend.label === "Vývoj se zhoršuje" ? "Dlouhodobě klesající" : recommendationTrend.label === "Porost se zlepšuje" ? "Dlouhodobě rostoucí" : recommendationTrend.label === "Vývoj je stabilní" ? "Dlouhodobě stabilní" : recommendationTrend.label}</div></div>
               <div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[9px] text-slate-600">POSLEDNÍ ZMĚNA</div><div className={`mt-1 text-lg font-black ${latestNdviChangeClass}`}>{latestNdviChangeLabel}</div><div className="mt-1 text-[8px] text-slate-600">oproti předchozímu měření</div></div>
