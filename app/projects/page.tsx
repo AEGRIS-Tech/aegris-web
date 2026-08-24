@@ -275,6 +275,7 @@ export default function ProjectsPage() {
         <main className="min-w-0 flex-1">
           <div className="mb-7 flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div>
+
               <div className="text-xs uppercase tracking-[0.25em] text-cyan-400">
                 AEGRIS / PROJEKTY
               </div>
