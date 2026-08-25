@@ -87,6 +87,11 @@ export type ScoreBreakdownItem = {
 type DiagnosticCause = {
   code: string;
   label: string;
+  /**
+   * Heuristická síla podpůrných signálů v rozsahu 0–1.
+   * Není to statistická pravděpodobnost ani laboratorně ověřená jistota.
+   * Název pole zůstává kvůli kompatibilitě existujícího UI.
+   */
   confidence: number;
   evidence: string[];
 };
@@ -100,7 +105,8 @@ export type ContextEvaluation = {
     | "Dobrý stav"
     | "Zvýšené riziko"
     | "Vysoké riziko"
-    | "Kritický stav";
+    | "Kritický stav"
+    | "Bez vyhodnocení";
   trend: NdviTrend;
   scoreBreakdown: ScoreBreakdownItem[];
   criticalFactorCount: number;
@@ -361,7 +367,7 @@ export function evaluateProjectContext(
       level: "Bez vyhodnocení",
       priority: "Nízká",
       score: 0,
-      scoreLevel: "Kritický stav",
+      scoreLevel: "Bez vyhodnocení",
       trend: {
         direction: "Nedostatek dat",
         slope: null,
@@ -1335,7 +1341,7 @@ export function evaluateProjectContext(
       label: "Pravděpodobnost srážek",
       status: "OK",
       detail:
-        `Pravděpodobnost srážek je ${probability.toFixed(0)} %.`,
+        `Nejvyšší hodinová pravděpodobnost srážek v příštích 24 h je ${probability.toFixed(0)} %.`,
     });
   }
 
@@ -1663,18 +1669,7 @@ export function evaluateProjectContext(
         relativeScore * 0.6 +
         slopeScore * 0.4
       );
-console.log("AEGRIS TREND SCORE DEBUG", {
-  trendHistory: trendHistory.map((item) => Number(item.ndvi)),
-  ndvi,
-  values,
-  first,
-  relativeChangePct,
-  relativeScore,
-  slope,
-  slopeScore,
-  continuousTrendScore,
-});
-  } else if (
+} else if (
     previousNdvi != null &&
     Number.isFinite(previousNdvi)
   ) {

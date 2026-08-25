@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
+export const dynamic = "force-dynamic";
+
 type NdviHistoryRow = {
   period_from: string;
   period_to: string;
   ndvi: number;
   created_at: string;
 };
+
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : null;
+}
 
 export async function GET(request: Request) {
   try {
@@ -21,17 +33,7 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Chybí NEXT_PUBLIC_SUPABASE_URL nebo SUPABASE_SERVICE_ROLE_KEY",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!supabasePublishableKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Chybí NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+            "Server nemá nakonfigurované NEXT_PUBLIC_SUPABASE_URL nebo NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.",
         },
         { status: 500 }
       );
@@ -39,7 +41,7 @@ export async function GET(request: Request) {
 
     const cookieStore = await cookies();
 
-    const authSupabase = createServerClient(
+    const supabase = createServerClient(
       supabaseUrl,
       supabasePublishableKey,
       {
@@ -60,17 +62,23 @@ export async function GET(request: Request) {
                 }
               );
             } catch {
-              // Cookie refresh není pro tento request kritický.
+              // Refresh cookies není pro tento read-only endpoint kritický.
             }
           },
         },
       }
     );
 
+    /*
+     * --------------------------------------------------
+     * AUTH
+     * --------------------------------------------------
+     */
+
     const {
       data: { user },
       error: userError,
-    } = await authSupabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
     if (userError || !user) {
       return NextResponse.json(
@@ -81,33 +89,12 @@ export async function GET(request: Request) {
         { status: 401 }
       );
     }
-const supabase = createServerClient(
-  supabaseUrl,
-  supabasePublishableKey,
-  {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
 
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(
-            ({ name, value, options }) => {
-              cookieStore.set(
-                name,
-                value,
-                options
-              );
-            }
-          );
-        } catch {
-          // Cookie refresh není pro tento request kritický.
-        }
-      },
-    },
-  }
-);
+    /*
+     * --------------------------------------------------
+     * PROJECT ID
+     * --------------------------------------------------
+     */
 
     const { searchParams } =
       new URL(request.url);
@@ -116,7 +103,10 @@ const supabase = createServerClient(
       searchParams.get("projectId")
     );
 
-    if (!Number.isFinite(projectId)) {
+    if (
+      !Number.isInteger(projectId) ||
+      projectId <= 0
+    ) {
       return NextResponse.json(
         {
           error:
@@ -126,32 +116,58 @@ const supabase = createServerClient(
       );
     }
 
+    /*
+     * --------------------------------------------------
+     * PROJECT OWNERSHIP
+     * --------------------------------------------------
+     */
+
     const {
       data: project,
       error: projectError,
     } = await supabase
       .from("projects")
-      .select("id, user_id")
+      .select("id")
       .eq("id", projectId)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
-      console.log("HISTORY PROJECT DEBUG:", {
-  userId: user.id,
-  projectId,
-  project,
-  projectError: projectError?.message ?? null,
-});
+    if (projectError) {
+      console.error(
+        "CHYBA OVĚŘENÍ PROJEKTU:",
+        projectError
+      );
 
-    if (projectError || !project) {
       return NextResponse.json(
         {
           error:
-            "Projekt nebyl nalezen nebo k němu nemáš přístup.",
+            "Nepodařilo se ověřit přístup k projektu.",
+          details:
+            projectError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!project) {
+      return NextResponse.json(
+        {
+          error:
+            "Projekt nebyl nalezen nebo k němu nemáte přístup.",
         },
         { status: 404 }
       );
     }
+
+    /*
+     * --------------------------------------------------
+     * NDVI HISTORY
+     *
+     * period_from / period_to jsou skutečná časová okna
+     * Sentinel-2 agregace. created_at je pouze čas zápisu
+     * řádku do databáze a nepoužívá se jako datum měření.
+     * --------------------------------------------------
+     */
 
     const {
       data: rows,
@@ -183,8 +199,46 @@ const supabase = createServerClient(
       );
     }
 
-    const history =
-      (rows ?? []) as NdviHistoryRow[];
+    /*
+     * --------------------------------------------------
+     * NORMALIZACE
+     * --------------------------------------------------
+     */
+
+    const history: NdviHistoryRow[] =
+      (rows ?? [])
+        .map((row) => {
+          const ndvi =
+            numberOrNull(row.ndvi);
+
+          if (
+            ndvi === null ||
+            typeof row.period_from !== "string" ||
+            typeof row.period_to !== "string" ||
+            typeof row.created_at !== "string"
+          ) {
+            return null;
+          }
+
+          return {
+            period_from: row.period_from,
+            period_to: row.period_to,
+            ndvi,
+            created_at: row.created_at,
+          };
+        })
+        .filter(
+          (
+            row
+          ): row is NdviHistoryRow =>
+            row !== null
+        );
+
+    /*
+     * --------------------------------------------------
+     * SUMMARY
+     * --------------------------------------------------
+     */
 
     const first =
       history.length > 0
@@ -202,32 +256,20 @@ const supabase = createServerClient(
     const currentNdvi =
       last?.ndvi ?? null;
 
-    let change:
-      | number
-      | null = null;
-
-    if (
+    const change =
       startNdvi !== null &&
       currentNdvi !== null
-    ) {
-      change =
-        currentNdvi - startNdvi;
-    }
+        ? currentNdvi - startNdvi
+        : null;
 
-    let changePercent:
-      | number
-      | null = null;
-
-    if (
+    const changePercent =
       startNdvi !== null &&
       currentNdvi !== null &&
       startNdvi !== 0
-    ) {
-      changePercent =
-        ((currentNdvi - startNdvi) /
-          Math.abs(startNdvi)) *
-        100;
-    }
+        ? ((currentNdvi - startNdvi) /
+            Math.abs(startNdvi)) *
+          100
+        : null;
 
     return NextResponse.json({
       projectId,

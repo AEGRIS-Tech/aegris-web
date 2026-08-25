@@ -124,7 +124,7 @@ export default function MapPage() {
           projects[0].latitude,
         ],
         zoom: 15,
-        duration: 800,
+        duration: 1000,
       });
 
       return;

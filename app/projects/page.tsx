@@ -482,7 +482,7 @@ export default function ProjectsPage() {
                       </Link>
 
                       <Link
-                        href={`/projects/${project.id}?view=edit`}
+                        href={`/projects/${project.id}/edit`}
                         className="rounded-xl bg-yellow-500 px-5 py-2.5 font-bold text-slate-950 transition hover:bg-yellow-400"
                       >
                         Upravit

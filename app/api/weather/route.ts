@@ -3,6 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 function numberOrNull(value: unknown): number | null {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
   const number = Number(value);
 
   return Number.isFinite(number) ? number : null;
@@ -140,12 +148,6 @@ export async function GET(request: NextRequest) {
     const hourly = data.hourly ?? {};
     const daily = data.daily ?? {};
 
-    /*
-     * --------------------------------------------------
-     * HOURLY DATA
-     * --------------------------------------------------
-     */
-
     const hourlyTimes: string[] =
       Array.isArray(hourly.time)
         ? hourly.time
@@ -180,12 +182,6 @@ export async function GET(request: NextRequest) {
     if (currentIndex < 0) {
       currentIndex = 0;
     }
-
-    /*
-     * --------------------------------------------------
-     * NEXT 24 HOURS
-     * --------------------------------------------------
-     */
 
     const next24hPrecipitation =
       hourlyPrecipitation
@@ -249,12 +245,6 @@ export async function GET(request: NextRequest) {
           )
         : null;
 
-    /*
-     * --------------------------------------------------
-     * DAILY DATA
-     * --------------------------------------------------
-     */
-
     const dailyMin: unknown[] =
       Array.isArray(
         daily.temperature_2m_min
@@ -275,12 +265,6 @@ export async function GET(request: NextRequest) {
       )
         ? daily.et0_fao_evapotranspiration
         : [];
-
-    /*
-     * --------------------------------------------------
-     * CURRENT CONDITIONS
-     * --------------------------------------------------
-     */
 
     const temperature =
       numberOrNull(
@@ -304,22 +288,13 @@ export async function GET(request: NextRequest) {
 
     const soilMoistureRaw =
       numberOrNull(
-        current.soil_moisture_9_to_27cm,
+        current.soil_moisture_9_to_27cm
       );
 
     const soilMoisture =
       soilMoistureRaw !== null
         ? soilMoistureRaw * 100
         : null;
-
-    /*
-     * --------------------------------------------------
-     * RESPONSE
-     *
-     * Názvy jsou schválně ve formátu,
-     * který očekává page.tsx.
-     * --------------------------------------------------
-     */
 
     return NextResponse.json({
       latitude:

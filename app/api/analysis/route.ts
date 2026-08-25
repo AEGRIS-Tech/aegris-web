@@ -3,23 +3,49 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = "force-dynamic";
+
 const TOKEN_URL =
   "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
 
 const STATS_URL =
   "https://sh.dataspace.copernicus.eu/statistics/v1";
 
+const MIN_VALID_GEOMETRY_PCT = 60;
+const ANALYSIS_LOCK_STALE_SECONDS = 15 * 60;
+
 type BoundaryPoint = {
   latitude: number;
   longitude: number;
 };
 
-type GeoJSONPolygon = {
-  type: "Polygon";
-  coordinates: number[][][];
+type NdviHistoryItem = {
+  from: string;
+  to: string;
+  ndvi: number;
+  medianNdvi: number | null;
+  p05Ndvi: number | null;
+  p95Ndvi: number | null;
+  minNdvi: number | null;
+  maxNdvi: number | null;
+  sampleCount: number | null;
+  noDataCount: number | null;
+  validPixelCount: number | null;
+  geometryPixelCount: number;
+  validGeometryPct: number;
 };
 
-type CopernicusStatisticsItem = {
+type Statistics = {
+  min?: number;
+  max?: number;
+  mean?: number;
+  stDev?: number;
+  sampleCount?: number;
+  noDataCount?: number;
+  percentiles?: Record<string, number>;
+};
+
+type CopernicusItem = {
   interval?: {
     from?: string;
     to?: string;
@@ -28,56 +54,47 @@ type CopernicusStatisticsItem = {
     default?: {
       bands?: {
         B0?: {
-          stats?: {
-            mean?: number;
-          };
+          stats?: Statistics;
         };
       };
     };
   };
 };
 
-type CopernicusStatisticsResponse = {
-  data?: CopernicusStatisticsItem[];
+type CopernicusResponse = {
+  data?: CopernicusItem[];
+  status?: string;
+  geometryPixelCount?: number;
 };
 
-type NdviHistoryItem = {
-  from: string;
-  to: string;
-  ndvi: number;
-};
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
 
-function isValidBoundary(
-  boundary: unknown
-): boundary is BoundaryPoint[] {
-  if (!Array.isArray(boundary)) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function clampNdvi(value: number): number {
+  return Math.max(-1, Math.min(1, value));
+}
+
+function isValidBoundary(value: unknown): value is BoundaryPoint[] {
+  if (!Array.isArray(value) || value.length < 3) {
     return false;
   }
 
-  if (boundary.length < 3) {
-    return false;
-  }
-
-  return boundary.every((point) => {
-    if (
-      point === null ||
-      typeof point !== "object"
-    ) {
+  return value.every((item) => {
+    if (item === null || typeof item !== "object") {
       return false;
     }
 
-    const candidate =
-      point as Record<string, unknown>;
-
-    const latitude =
-      candidate.latitude;
-
-    const longitude =
-      candidate.longitude;
+    const candidate = item as Record<string, unknown>;
+    const latitude = Number(candidate.latitude);
+    const longitude = Number(candidate.longitude);
 
     return (
-      typeof latitude === "number" &&
-      typeof longitude === "number" &&
       Number.isFinite(latitude) &&
       Number.isFinite(longitude) &&
       latitude >= -90 &&
@@ -88,989 +105,910 @@ function isValidBoundary(
   });
 }
 
-function boundaryToGeoJSON(
-  boundary: BoundaryPoint[]
-): GeoJSONPolygon {
-  const coordinates = boundary.map(
-    (point) => [
-      point.longitude,
-      point.latitude,
-    ]
-  );
-
-  coordinates.push([
-    boundary[0].longitude,
-    boundary[0].latitude,
+function createPolygon(boundary: BoundaryPoint[]) {
+  const coordinates = boundary.map((point) => [
+    Number(point.longitude),
+    Number(point.latitude),
   ]);
 
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    coordinates.push([first[0], first[1]]);
+  }
+
   return {
-    type: "Polygon",
+    type: "Polygon" as const,
     coordinates: [coordinates],
   };
 }
 
-function isCopernicusStatisticsResponse(
-  value: unknown
-): value is CopernicusStatisticsResponse {
-  if (
-    value === null ||
-    typeof value !== "object"
-  ) {
-    return false;
-  }
-
-  const candidate =
-    value as Record<string, unknown>;
-
-  if (
-    candidate.data !== undefined &&
-    !Array.isArray(candidate.data)
-  ) {
-    return false;
-  }
-
-  return true;
+/*
+ * WGS84 longitude/latitude -> WGS84 / UTM.
+ * Bez externí knihovny.
+ *
+ * Pro projekt zvolíme UTM zónu podle středu polygonu.
+ * EPSG:
+ *   severní polokoule = 326xx
+ *   jižní polokoule   = 327xx
+ */
+function getUtmZone(longitude: number): number {
+  return Math.max(
+    1,
+    Math.min(60, Math.floor((longitude + 180) / 6) + 1)
+  );
 }
 
-function extractNdvi(
-  item: CopernicusStatisticsItem
+function getUtmEpsg(latitude: number, longitude: number): number {
+  const zone = getUtmZone(longitude);
+  return latitude >= 0 ? 32600 + zone : 32700 + zone;
+}
+
+function wgs84ToUtm(
+  latitude: number,
+  longitude: number,
+  zone: number
+): [number, number] {
+  const a = 6378137.0;
+  const f = 1 / 298.257223563;
+  const k0 = 0.9996;
+
+  const e2 = f * (2 - f);
+  const ep2 = e2 / (1 - e2);
+
+  const latRad = (latitude * Math.PI) / 180;
+  const lonRad = (longitude * Math.PI) / 180;
+  const lonOriginDeg = (zone - 1) * 6 - 180 + 3;
+  const lonOriginRad = (lonOriginDeg * Math.PI) / 180;
+
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const tanLat = Math.tan(latRad);
+
+  const n = a / Math.sqrt(1 - e2 * sinLat * sinLat);
+  const t = tanLat * tanLat;
+  const c = ep2 * cosLat * cosLat;
+  const A = cosLat * (lonRad - lonOriginRad);
+
+  const e4 = e2 * e2;
+  const e6 = e4 * e2;
+
+  const m =
+    a *
+    ((1 - e2 / 4 - (3 * e4) / 64 - (5 * e6) / 256) * latRad -
+      ((3 * e2) / 8 + (3 * e4) / 32 + (45 * e6) / 1024) *
+        Math.sin(2 * latRad) +
+      ((15 * e4) / 256 + (45 * e6) / 1024) * Math.sin(4 * latRad) -
+      ((35 * e6) / 3072) * Math.sin(6 * latRad));
+
+  const easting =
+    k0 *
+      n *
+      (A +
+        ((1 - t + c) * Math.pow(A, 3)) / 6 +
+        ((5 - 18 * t + t * t + 72 * c - 58 * ep2) *
+          Math.pow(A, 5)) /
+          120) +
+    500000;
+
+  let northing =
+    k0 *
+    (m +
+      n *
+        tanLat *
+        (Math.pow(A, 2) / 2 +
+          ((5 - t + 9 * c + 4 * c * c) * Math.pow(A, 4)) / 24 +
+          ((61 - 58 * t + t * t + 600 * c - 330 * ep2) *
+            Math.pow(A, 6)) /
+            720));
+
+  if (latitude < 0) {
+    northing += 10000000;
+  }
+
+  return [easting, northing];
+}
+
+function createUtmPolygon(boundary: BoundaryPoint[]) {
+  const centerLatitude =
+    boundary.reduce((sum, point) => sum + Number(point.latitude), 0) /
+    boundary.length;
+
+  const centerLongitude =
+    boundary.reduce((sum, point) => sum + Number(point.longitude), 0) /
+    boundary.length;
+
+  const zone = getUtmZone(centerLongitude);
+  const epsg = getUtmEpsg(centerLatitude, centerLongitude);
+
+  const coordinates = boundary.map((point) =>
+    wgs84ToUtm(
+      Number(point.latitude),
+      Number(point.longitude),
+      zone
+    )
+  );
+
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    coordinates.push([first[0], first[1]]);
+  }
+
+  return {
+    polygon: {
+      type: "Polygon" as const,
+      coordinates: [coordinates],
+    },
+    epsg,
+    zone,
+  };
+}
+
+function getPercentile(
+  percentiles: Record<string, number> | undefined,
+  percentile: number
 ): number | null {
-  const ndvi =
-    item.outputs?.default?.bands?.B0?.stats?.mean;
+  if (!percentiles) {
+    return null;
+  }
 
-  return typeof ndvi === "number" &&
-    Number.isFinite(ndvi)
-    ? ndvi
-    : null;
+  for (const key of [`${percentile}.0`, String(percentile)]) {
+    const value = numberOrNull(percentiles[key]);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
-export async function GET(
-  request: Request
-) {
+export async function GET(request: Request) {
   try {
-    // --------------------------------------------------
-    // 1. SUPABASE / PŘIHLÁŠENÝ UŽIVATEL
-    // --------------------------------------------------
+    const cookieStore = await cookies();
 
-    const cookieStore =
-      await cookies();
-
-    const supabase =
-      createServerClient(
-        process.env
-          .NEXT_PUBLIC_SUPABASE_URL!,
-        process.env
-          .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return cookieStore.getAll();
-            },
-
-            setAll(cookiesToSet) {
-              try {
-                cookiesToSet.forEach(
-                  ({
-                    name,
-                    value,
-                    options,
-                  }) => {
-                    cookieStore.set(
-                      name,
-                      value,
-                      options
-                    );
-                  }
-                );
-              } catch {
-                // Cookie update není v tomto místě
-                // kritický pro samotné načtení uživatele.
-              }
-            },
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
           },
-        }
-      );
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options);
+              });
+            } catch {
+              // Route handler nemusí vždy povolit změnu cookies.
+            }
+          },
+        },
+      }
+    );
 
     const {
       data: { user },
       error: userError,
-    } =
-      await supabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
     if (userError || !user) {
-  return NextResponse.json(
-    {
-      error:
-        "Uživatel není přihlášen.",
-    },
-    { status: 401 }
-  );
-}
-
-    // --------------------------------------------------
-    // 1A. ANALYSIS RATE LIMIT
-    // 5 analýz / 10 minut / uživatel
-    // --------------------------------------------------
-
-    const serviceSupabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-  }
-);
-
-const {
-  data: rateLimitResult,
-  error: rateLimitError,
-} = await serviceSupabase.rpc(
-  "consume_analysis_rate_limit",
-  {
-    p_user_id: user.id,
-    p_limit: 5,
-    p_window_seconds: 600,
-  }
-);
-
-    if (rateLimitError) {
-      console.error(
-        "ANALYSIS RATE LIMIT ERROR:",
-        rateLimitError
-      );
-
       return NextResponse.json(
-        {
-          error:
-            "Nepodařilo se ověřit limit analýz.",
-        },
+        { error: "Uživatel není přihlášen." },
+        { status: 401 }
+      );
+    }
+
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!serviceRoleKey) {
+      console.error("CHYBÍ SUPABASE_SERVICE_ROLE_KEY");
+      return NextResponse.json(
+        { error: "Server nemá nakonfigurovaný Supabase service role key." },
         { status: 500 }
       );
     }
 
-    const rateLimit = Array.isArray(
-      rateLimitResult
-    )
-      ? rateLimitResult[0]
-      : rateLimitResult;
-
-    if (!rateLimit?.allowed) {
-      const retryAfter =
-        Number(
-          rateLimit?.retry_after_seconds
-        ) || 600;
-
-      return NextResponse.json(
-        {
-          error:
-            "Dosáhli jste limitu analýz. Zkuste to znovu později.",
-          retryAfterSeconds:
-            retryAfter,
+    const serviceSupabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
         },
-        {
-          status: 429,
-          headers: {
-            "Retry-After":
-              String(retryAfter),
-          },
-        }
-      );
-    }
-
-    // --------------------------------------------------
-    // 2. PARAMETRY
-    // --------------------------------------------------
-
-    const { searchParams } =
-      new URL(request.url);
-
-    const projectIdParam =
-      searchParams.get(
-        "projectId"
-      );
-
-    const latitudeParam =
-      searchParams.get(
-        "latitude"
-      );
-
-    const longitudeParam =
-      searchParams.get(
-        "longitude"
-      );
-
-    const projectId =
-      projectIdParam
-        ? Number(projectIdParam)
-        : null;
-
-    // --------------------------------------------------
-    // 3. PROJEKT
-    // --------------------------------------------------
-
-    let latitude: number | null =
-      null;
-
-    let longitude: number | null =
-      null;
-
-    let boundary:
-      | BoundaryPoint[]
-      | null = null;
-
-    if (
-      projectId !== null &&
-      Number.isFinite(projectId)
-    ) {
-      const {
-        data: project,
-        error: projectError,
-      } = await supabase
-        .from("projects")
-        .select(
-          "id, latitude, longitude, boundary, user_id"
-        )
-        .eq("id", projectId)
-        .eq(
-          "user_id",
-          user.id
-        )
-        .single();
-
-      if (
-        projectError ||
-        !project
-      ) {
-        console.error(
-          "CHYBA NAČTENÍ PROJEKTU:",
-          projectError
-        );
-
-        return NextResponse.json(
-          {
-            error:
-              "Projekt nebyl nalezen nebo k němu nemáš přístup.",
-          },
-          { status: 404 }
-        );
       }
+    );
 
-      latitude =
-        typeof project.latitude ===
-        "number"
-          ? project.latitude
-          : Number(
-              project.latitude
-            );
+    const url = new URL(request.url);
+    const projectIdParam = url.searchParams.get("projectId");
 
-      longitude =
-        typeof project.longitude ===
-        "number"
-          ? project.longitude
-          : Number(
-              project.longitude
-            );
-
-      if (
-        isValidBoundary(
-          project.boundary
-        )
-      ) {
-        boundary =
-          project.boundary;
-      }
-    }
-
-    // --------------------------------------------------
-    // 4. ZÁLOŽNÍ REŽIM
-    // --------------------------------------------------
-
-    if (
-      latitude === null ||
-      !Number.isFinite(latitude)
-    ) {
-      latitude =
-        latitudeParam !== null
-          ? Number(latitudeParam)
-          : null;
-    }
-
-    if (
-      longitude === null ||
-      !Number.isFinite(longitude)
-    ) {
-      longitude =
-        longitudeParam !== null
-          ? Number(longitudeParam)
-          : null;
-    }
-
-    if (
-      latitude === null ||
-      longitude === null ||
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude)
-    ) {
+    if (!projectIdParam) {
       return NextResponse.json(
-        {
-          error:
-            "Chybí platné souřadnice nebo projectId.",
-        },
+        { error: "Chybí ID projektu." },
         { status: 400 }
       );
     }
 
-    // --------------------------------------------------
-    // 5. OAUTH COPERNICUS
-    // --------------------------------------------------
+    const projectId = Number(projectIdParam);
 
-    const clientId =
-      process.env
-        .SENTINEL_CLIENT_ID;
-
-    const clientSecret =
-      process.env
-        .SENTINEL_CLIENT_SECRET;
-
-    if (
-      !clientId ||
-      !clientSecret
-    ) {
+    if (!Number.isInteger(projectId) || projectId <= 0) {
       return NextResponse.json(
-        {
-          error:
-            "Chybí SENTINEL_CLIENT_ID nebo SENTINEL_CLIENT_SECRET",
-        },
-        { status: 500 }
+        { error: "Neplatné ID projektu." },
+        { status: 400 }
       );
     }
 
-    const tokenResponse =
-      await fetch(
-        TOKEN_URL,
-        {
-          method: "POST",
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("id, latitude, longitude, boundary, user_id")
+      .eq("id", projectId)
+      .eq("user_id", user.id)
+      .single();
 
-          headers: {
-            "Content-Type":
-              "application/x-www-form-urlencoded",
-          },
-
-          body: new URLSearchParams({
-            grant_type:
-              "client_credentials",
-
-            client_id:
-              clientId,
-
-            client_secret:
-              clientSecret,
-          }),
-        }
+    if (projectError || !project) {
+      console.error("CHYBA NAČTENÍ PROJEKTU:", projectError);
+      return NextResponse.json(
+        { error: "Projekt nebyl nalezen nebo k němu nemáte přístup." },
+        { status: 404 }
       );
+    }
 
-    if (
-      !tokenResponse.ok
-    ) {
-      const errorText =
-        await tokenResponse.text();
+    const staleBefore = new Date(
+      Date.now() - ANALYSIS_LOCK_STALE_SECONDS * 1000
+    ).toISOString();
 
+    const { error: staleLockDeleteError } = await serviceSupabase
+      .from("analysis_locks")
+      .delete()
+      .eq("project_id", projectId)
+      .lt("locked_at", staleBefore);
+
+    if (staleLockDeleteError) {
       console.error(
-        "OAUTH ERROR:",
-        errorText
+        "ANALYSIS STALE LOCK CLEANUP ERROR:",
+        staleLockDeleteError
       );
-
       return NextResponse.json(
-        {
-          error:
-            "OAuth selhal",
-          details:
-            errorText,
-        },
+        { error: "Nepodařilo se ověřit stav probíhající analýzy." },
         { status: 500 }
       );
     }
 
-    const token =
-      (await tokenResponse.json()) as {
-        access_token?: string;
-      };
+    const { error: lockInsertError } = await serviceSupabase
+      .from("analysis_locks")
+      .insert({
+        project_id: projectId,
+        user_id: user.id,
+      });
 
-    const accessToken =
-      token.access_token;
+    if (lockInsertError) {
+      if (lockInsertError.code === "23505") {
+        return NextResponse.json(
+          {
+            error: "Analýza tohoto projektu již probíhá.",
+            code: "ANALYSIS_ALREADY_RUNNING",
+          },
+          { status: 409 }
+        );
+      }
+
+      console.error("ANALYSIS LOCK ERROR:", lockInsertError);
+
+      return NextResponse.json(
+        { error: "Nepodařilo se uzamknout analýzu projektu." },
+        { status: 500 }
+      );
+    }
+
+    try {
+      const { data: rateLimitData, error: rateLimitError } =
+        await serviceSupabase.rpc("consume_analysis_rate_limit", {
+          p_user_id: user.id,
+          p_limit: 5,
+          p_window_seconds: 600,
+        });
+
+      if (rateLimitError) {
+        console.error("ANALYSIS RATE LIMIT ERROR:", rateLimitError);
+        return NextResponse.json(
+          { error: "Nepodařilo se ověřit limit analýz." },
+          { status: 500 }
+        );
+      }
+
+      const rateLimit = Array.isArray(rateLimitData)
+        ? rateLimitData[0]
+        : rateLimitData;
+
+      if (rateLimit && rateLimit.allowed === false) {
+        const retryAfter =
+          Number(rateLimit.retry_after_seconds) || 600;
+
+        return NextResponse.json(
+          {
+            error: "Dosáhli jste limitu analýz. Zkuste to později.",
+            retryAfterSeconds: retryAfter,
+          },
+          {
+            status: 429,
+            headers: {
+              "Retry-After": String(retryAfter),
+            },
+          }
+        );
+      }
+
+    const latitude = Number(project.latitude);
+    const longitude = Number(project.longitude);
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return NextResponse.json(
+        { error: "Projekt nemá platné souřadnice." },
+        { status: 422 }
+      );
+    }
+
+    if (!isValidBoundary(project.boundary)) {
+      return NextResponse.json(
+        {
+          error:
+            "Projekt nemá platnou hranici pozemku. Analýza byla zastavena, aby nebylo vyhodnocováno okolí GPS bodu místo skutečného pole.",
+          code: "PROJECT_BOUNDARY_REQUIRED",
+        },
+        { status: 422 }
+      );
+    }
+
+    const boundary = project.boundary;
+
+    /*
+     * Statistical API dostane polygon v metrickém UTM CRS.
+     * Díky tomu resx/resy = 10 skutečně znamená 10 metrů.
+     */
+    const {
+      polygon,
+      epsg: analysisEpsg,
+      zone: analysisUtmZone,
+    } = createUtmPolygon(boundary);
+
+    const clientId = process.env.SENTINEL_CLIENT_ID;
+    const clientSecret = process.env.SENTINEL_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      return NextResponse.json(
+        { error: "Server nemá nakonfigurované přihlašovací údaje Copernicus." },
+        { status: 500 }
+      );
+    }
+
+    const tokenResponse = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+      cache: "no-store",
+    });
+
+    if (!tokenResponse.ok) {
+      const text = await tokenResponse.text();
+      console.error("COPERNICUS TOKEN ERROR:", text);
+      return NextResponse.json(
+        { error: "Nepodařilo se přihlásit ke Copernicus Data Space." },
+        { status: 502 }
+      );
+    }
+
+    const tokenJson = (await tokenResponse.json()) as {
+      access_token?: string;
+    };
+
+    const accessToken = tokenJson.access_token;
 
     if (!accessToken) {
       return NextResponse.json(
-        {
-          error:
-            "OAuth odpověď neobsahuje access_token.",
-        },
-        { status: 500 }
+        { error: "Copernicus nevrátil access token." },
+        { status: 502 }
       );
     }
-
-    // --------------------------------------------------
-    // 6. EVALSCRIPT NDVI
-    // --------------------------------------------------
 
     const evalscript = `
- //VERSION=3
+      //VERSION=3
 
- function setup() {
-   return {
-     input: [
-       {
-         bands: ["B04", "B08", "dataMask"]
-       }
-     ],
+      function setup() {
+        return {
+          input: [{
+            bands: [
+              "B04",
+              "B08",
+              "SCL",
+              "dataMask"
+            ]
+          }],
+          output: [
+            {
+              id: "default",
+              bands: 1,
+              sampleType: "FLOAT32"
+            },
+            {
+              id: "dataMask",
+              bands: 1
+            }
+          ]
+        };
+      }
 
-     output: [
-       {
-         id: "default",
-         bands: 1,
-         sampleType: "FLOAT32"
-       },
+      function evaluatePixel(samples) {
+        const red = samples.B04;
+        const nir = samples.B08;
+        const scl = samples.SCL;
+        const denominator = nir + red;
 
-       {
-         id: "dataMask",
-         bands: 1
-       }
-     ]
-   };
- }
+        let valid = 1;
 
- function evaluatePixel(samples) {
-   const b04 = samples.B04;
-   const b08 = samples.B08;
+        if (samples.dataMask === 0) {
+          valid = 0;
+        }
 
-   const denominator = b08 + b04;
+        if (
+          scl === 0 ||
+          scl === 1 ||
+          scl === 3 ||
+          scl === 6 ||
+          scl === 7 ||
+          scl === 8 ||
+          scl === 9 ||
+          scl === 10 ||
+          scl === 11
+        ) {
+          valid = 0;
+        }
 
-   let ndvi = 0;
+        if (denominator === 0) {
+          valid = 0;
+        }
 
-   if (denominator !== 0) {
-     ndvi =
-       (b08 - b04) /
-       denominator;
-   }
+        if (!valid) {
+          return {
+            default: [0],
+            dataMask: [0]
+          };
+        }
 
-   return {
-     default: [ndvi],
-     dataMask: [samples.dataMask]
-   };
- }
- `;
+        const ndvi = (nir - red) / denominator;
 
-    // --------------------------------------------------
-    // 7. OBDOBÍ - POSLEDNÍCH 6 MĚSÍCŮ
-    // --------------------------------------------------
+        if (!isFinite(ndvi) || ndvi < -1 || ndvi > 1) {
+          return {
+            default: [0],
+            dataMask: [0]
+          };
+        }
+
+        return {
+          default: [ndvi],
+          dataMask: [1]
+        };
+      }
+    `;
 
     const to = new Date();
+    const from = new Date(to);
+    from.setUTCMonth(from.getUTCMonth() - 6);
 
-    const from =
-      new Date(to);
-
-    from.setUTCMonth(
-      from.getUTCMonth() - 6
-    );
-
-    // --------------------------------------------------
-    // 8. GEOMETRIE PRO COPERNICUS
-    // --------------------------------------------------
-
-    let bounds:
-      | Record<string, unknown>;
-
-    if (boundary) {
-      const polygon =
-        boundaryToGeoJSON(
-          boundary
-        );
-
-      bounds = {
-        geometry: polygon,
-      };
-
-      console.log(
-        "AEGRIS ANALYSIS: POUŽÍVÁM HRANICI POZEMKU"
-      );
-
-      console.log(
-        "AEGRIS BOUNDARY:",
-        JSON.stringify(
-          polygon,
-          null,
-          2
-        )
-      );
-    } else {
-      bounds = {
-        bbox: [
-          longitude - 0.001,
-          latitude - 0.001,
-          longitude + 0.001,
-          latitude + 0.001,
-        ],
-      };
-
-      console.log(
-        "AEGRIS ANALYSIS: STARÝ BBOX REŽIM"
-      );
-    }
-
-    // --------------------------------------------------
-    // 9. COPERNICUS STATISTICS API
-    // --------------------------------------------------
-
-    const response =
-      await fetch(
-        STATS_URL,
-        {
-          method: "POST",
-
-          headers: {
-            Authorization:
-              `Bearer ${accessToken}`,
-
-            "Content-Type":
-              "application/json",
-
-            Accept:
-              "application/json",
+    const statisticsRequest = {
+      input: {
+        bounds: {
+          geometry: polygon,
+          properties: {
+            crs: `http://www.opengis.net/def/crs/EPSG/0/${analysisEpsg}`,
           },
-
-          body: JSON.stringify({
-            input: {
-              bounds,
-
-              data: [
-                {
-                  type:
-                    "sentinel-2-l2a",
-
-                  dataFilter: {
-                    maxCloudCoverage:
-                      20,
-                  },
-                },
-              ],
+        },
+        data: [
+          {
+            type: "sentinel-2-l2a",
+            dataFilter: {
+              mosaickingOrder: "leastCC",
+              maxCloudCoverage: 100,
             },
-
-            aggregation: {
-              timeRange: {
-                from:
-                  from.toISOString(),
-
-                to:
-                  to.toISOString(),
-              },
-
-              aggregationInterval: {
-                of: "P10D",
-              },
-
-              lastIntervalBehavior:
-                "SHORTEN",
-
-              width: 64,
-
-              height: 64,
-
-              evalscript,
-            },
-
-            calculations: {
-              default: {
-                statistics: {
-                  default: {
-                    percentiles: {
-                      k: [
-                        5,
-                        50,
-                        95,
-                      ],
-                    },
-                  },
-                },
+          },
+        ],
+      },
+      aggregation: {
+        timeRange: {
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
+        aggregationInterval: {
+          of: "P10D",
+        },
+        resx: 10,
+        resy: 10,
+        evalscript,
+      },
+      calculations: {
+        default: {
+          statistics: {
+            default: {
+              percentiles: {
+                k: [5, 50, 95],
               },
             },
-          }),
-        }
-      );
+          },
+        },
+      },
+    };
 
-    // --------------------------------------------------
-    // 10. RAW ODPOVĚĎ
-    // --------------------------------------------------
+    const statisticsResponse = await fetch(STATS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(statisticsRequest),
+      cache: "no-store",
+    });
 
-    const responseText =
-      await response.text();
-
-    console.log(
-      "STATISTICS STATUS:",
-      response.status
-    );
-
-    console.log(
-      "STATISTICS CONTENT-TYPE:",
-      response.headers.get(
-        "content-type"
-      )
-    );
+    const responseText = await statisticsResponse.text();
 
     console.log(
-      "STATISTICS RAW RESPONSE:",
-      responseText
+      "COPERNICUS STATISTICS STATUS:",
+      statisticsResponse.status
     );
 
-    // --------------------------------------------------
-    // 11. CHYBA COPERNICUS
-    // --------------------------------------------------
-
-    if (!response.ok) {
+    if (!statisticsResponse.ok) {
+      console.error("COPERNICUS STATISTICS ERROR:", responseText);
       return NextResponse.json(
         {
-          error:
-            "Statistics API error",
-
-          status:
-            response.status,
-
-          response:
-            responseText,
+          error: "Copernicus Statistical API vrátil chybu.",
+          copernicusStatus: statisticsResponse.status,
         },
-        { status: 500 }
+        { status: 502 }
       );
     }
 
-    // --------------------------------------------------
-    // 12. JSON
-    // --------------------------------------------------
-
-    let json: unknown;
+    let json: CopernicusResponse;
 
     try {
-      json =
-        JSON.parse(
-          responseText
-        );
+      json = JSON.parse(responseText) as CopernicusResponse;
     } catch {
       return NextResponse.json(
-        {
-          error:
-            "Copernicus vrátil neplatný JSON",
-
-          response:
-            responseText,
-        },
-        { status: 500 }
+        { error: "Copernicus vrátil neplatnou JSON odpověď." },
+        { status: 502 }
       );
     }
 
-    if (
-      !isCopernicusStatisticsResponse(
-        json
-      )
-    ) {
+    if (!Array.isArray(json.data)) {
+      console.error("NEOČEKÁVANÁ COPERNICUS RESPONSE:", json);
+      return NextResponse.json(
+        { error: "Copernicus vrátil neočekávanou strukturu dat." },
+        { status: 502 }
+      );
+    }
+
+    const geometryPixelCount = numberOrNull(json.geometryPixelCount);
+
+    if (geometryPixelCount === null || geometryPixelCount <= 0) {
+      console.error(
+        "CHYBÍ PLATNÉ geometryPixelCount:",
+        json.geometryPixelCount
+      );
+
       return NextResponse.json(
         {
           error:
-            "Copernicus vrátil neočekávanou strukturu JSON.",
+            "Copernicus nevrátil platný počet pixelů polygonu. Kvalitu měření proto nelze spolehlivě ověřit.",
+          code: "INVALID_GEOMETRY_PIXEL_COUNT",
         },
-        { status: 500 }
+        { status: 502 }
       );
     }
 
-    // --------------------------------------------------
-    // 13. HISTORIE NDVI
-    // --------------------------------------------------
+    const history: NdviHistoryItem[] = [];
 
-    const history: NdviHistoryItem[] =
-      (json.data ?? [])
-        .map(
-          (
-            item
-          ): NdviHistoryItem | null => {
-            const ndvi =
-              extractNdvi(item);
+    const rejectedIntervals: Array<{
+      from: string;
+      to: string;
+      validGeometryPct: number | null;
+      reason: string;
+    }> = [];
 
-            const interval =
-              item.interval;
+    for (const item of json.data) {
+      const interval = item.interval;
 
-            if (
-              !interval?.from ||
-              !interval.to ||
-              ndvi === null
-            ) {
-              return null;
-            }
+      if (!interval?.from || !interval?.to) {
+        continue;
+      }
 
-            return {
-              from:
-                interval.from,
+      const stats = item.outputs?.default?.bands?.B0?.stats;
 
-              to:
-                interval.to,
+      if (!stats) {
+        rejectedIntervals.push({
+          from: interval.from,
+          to: interval.to,
+          validGeometryPct: null,
+          reason: "Chybí statistika NDVI.",
+        });
+        continue;
+      }
 
-              ndvi,
-            };
-          }
-        )
-        .filter(
-          (
-            item
-          ): item is NdviHistoryItem =>
-            item !== null
-        );
+      const mean = numberOrNull(stats.mean);
+      const sampleCount = numberOrNull(stats.sampleCount);
+      const noDataCount = numberOrNull(stats.noDataCount);
 
-    console.log(
-      "NDVI HISTORY:",
-      JSON.stringify(
-        history,
-        null,
-        2
-      )
-    );
+      if (
+        mean === null ||
+        sampleCount === null ||
+        noDataCount === null
+      ) {
+        rejectedIntervals.push({
+          from: interval.from,
+          to: interval.to,
+          validGeometryPct: null,
+          reason: "Chybí mean/sampleCount/noDataCount.",
+        });
+        continue;
+      }
 
-    // --------------------------------------------------
-    // 14. SEŘAZENÍ HISTORIE
-    // --------------------------------------------------
+      const validPixelCount = Math.max(
+        0,
+        sampleCount - noDataCount
+      );
+
+      const validGeometryPct = Number(
+        Math.min(
+          100,
+          Math.max(
+            0,
+            (validPixelCount / geometryPixelCount) * 100
+          )
+        ).toFixed(1)
+      );
+
+      if (validPixelCount <= 0) {
+        rejectedIntervals.push({
+          from: interval.from,
+          to: interval.to,
+          validGeometryPct,
+          reason: "Žádný validní pixel po maskování.",
+        });
+        continue;
+      }
+
+      if (validGeometryPct < MIN_VALID_GEOMETRY_PCT) {
+        rejectedIntervals.push({
+          from: interval.from,
+          to: interval.to,
+          validGeometryPct,
+          reason: `Méně než ${MIN_VALID_GEOMETRY_PCT} % validních pixelů polygonu.`,
+        });
+        continue;
+      }
+
+      history.push({
+        from: interval.from,
+        to: interval.to,
+        ndvi: clampNdvi(mean),
+        medianNdvi: getPercentile(stats.percentiles, 50),
+        p05Ndvi: getPercentile(stats.percentiles, 5),
+        p95Ndvi: getPercentile(stats.percentiles, 95),
+        minNdvi: numberOrNull(stats.min),
+        maxNdvi: numberOrNull(stats.max),
+        sampleCount,
+        noDataCount,
+        validPixelCount,
+        geometryPixelCount,
+        validGeometryPct,
+      });
+    }
 
     history.sort(
       (a, b) =>
-        new Date(
-          a.from
-        ).getTime() -
-        new Date(
-          b.from
-        ).getTime()
+        new Date(a.from).getTime() -
+        new Date(b.from).getTime()
     );
 
-    // --------------------------------------------------
-// 14. ULOŽENÍ NDVI HISTORIE
-// --------------------------------------------------
+    if (history.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            `Pro tento pozemek nebylo v posledních 6 měsících nalezeno NDVI měření, které splňuje minimální datovou kvalitu ${MIN_VALID_GEOMETRY_PCT} % validních pixelů polygonu.`,
+          code: "NO_QUALITY_SENTINEL_DATA",
+          projectId,
+          latitude,
+          longitude,
+          hasBoundary: true,
+          boundaryPoints: boundary.length,
+          geometryPixelCount,
+          qualityGate: {
+            minValidGeometryPct: MIN_VALID_GEOMETRY_PCT,
+            rejectedIntervals: rejectedIntervals.length,
+          },
+        },
+        { status: 422 }
+      );
+    }
 
-if (
-  projectId !== null &&
-  Number.isFinite(projectId) &&
-  history.length > 0
-) {
-  const historyRows = history.map(
-    (item) => ({
+    const historyRows = history.map((item) => ({
       project_id: projectId,
       period_from: item.from,
       period_to: item.to,
       ndvi: item.ndvi,
-    })
-  );
+    }));
 
-  const {
-    error: historyDeleteError,
-  } = await serviceSupabase
-    .from("ndvi_history")
-    .delete()
-    .eq("project_id", projectId);
-
-  if (historyDeleteError) {
-    console.error(
-      "CHYBA SMAZÁNÍ STARÉ NDVI HISTORIE:",
-      historyDeleteError
-    );
-  } else {
-    const {
-      error: historyInsertError,
-    } = await serviceSupabase
+    const { error: deleteHistoryError } = await serviceSupabase
       .from("ndvi_history")
-      .insert(historyRows);
+      .delete()
+      .eq("project_id", projectId);
 
-    if (historyInsertError) {
+    if (deleteHistoryError) {
       console.error(
-        "CHYBA ULOŽENÍ NDVI HISTORIE:",
-        historyInsertError
+        "CHYBA SMAZÁNÍ NDVI HISTORY:",
+        deleteHistoryError
       );
     } else {
-      console.log(
-        "NDVI HISTORIE ULOŽENA:",
-        historyRows.length
-      );
-    }
-  }
-}
+      const { error: insertHistoryError } = await serviceSupabase
+        .from("ndvi_history")
+        .insert(historyRows);
 
-    // --------------------------------------------------
-    // 15. AKTUÁLNÍ NDVI
-    // --------------------------------------------------
-
-    const firstHistoryItem =
-      history.length > 0
-        ? history[0]
-        : null;
-
-    const lastHistoryItem =
-      history.length > 0
-        ? history[
-            history.length - 1
-          ]
-        : null;
-
-    const startNdvi =
-      firstHistoryItem?.ndvi ??
-      null;
-
-    const currentNdvi =
-      lastHistoryItem?.ndvi ??
-      null;
-
-    // --------------------------------------------------
-    // 16. ZMĚNA NDVI
-    // --------------------------------------------------
-
-    let change:
-      | number
-      | null = null;
-
-    if (
-      startNdvi !== null &&
-      currentNdvi !== null
-    ) {
-      change =
-        currentNdvi -
-        startNdvi;
+      if (insertHistoryError) {
+        console.error(
+          "CHYBA ULOŽENÍ NDVI HISTORY:",
+          insertHistoryError
+        );
+      }
     }
 
-    // --------------------------------------------------
-    // 17. TREND
-    // --------------------------------------------------
+    const first = history[0];
+    const latest = history[history.length - 1];
 
-    let trend =
-      "Stabilní";
+    const startNdvi = first.ndvi;
+    const currentNdvi = latest.ndvi;
 
-    if (
-      change !== null
-    ) {
-      if (
-        change <= -0.05
-      ) {
-        trend =
-          "Zhoršující se";
-      } else if (
-        change >= 0.05
-      ) {
-        trend =
-          "Zlepšující se";
+    const change =
+      history.length >= 2
+        ? currentNdvi - startNdvi
+        : null;
+
+    let trend = "Nedostatek dat";
+
+    if (change !== null) {
+      if (change <= -0.05) {
+        trend = "Zhoršující se";
+      } else if (change >= 0.05) {
+        trend = "Zlepšující se";
       } else {
-        trend =
-          "Stabilní";
+        trend = "Stabilní";
       }
     }
 
-    // --------------------------------------------------
-    // 18. RIZIKO
-    // --------------------------------------------------
+    let risk = "Nízké";
 
-    let risk =
-      "Nízké";
-
-    if (
-      currentNdvi !== null &&
-      currentNdvi < 0.20
-    ) {
-      risk =
-        "Kritické";
-    } else if (
-      change !== null &&
-      change <= -0.15
-    ) {
-      risk =
-        "Kritické";
-    } else if (
-      change !== null &&
-      change <= -0.05
-    ) {
-      risk =
-        "Vysoké";
-    } else if (
-      currentNdvi !== null &&
-      currentNdvi < 0.40
-    ) {
-      risk =
-        "Vysoké";
-    } else if (
-      currentNdvi !== null &&
-      currentNdvi < 0.60
-    ) {
-      risk =
-        "Střední";
+    if (currentNdvi < 0.20) {
+      risk = "Kritické";
+    } else if (change !== null && change <= -0.15) {
+      risk = "Kritické";
+    } else if (change !== null && change <= -0.05) {
+      risk = "Vysoké";
+    } else if (currentNdvi < 0.40) {
+      risk = "Vysoké";
+    } else if (currentNdvi < 0.60) {
+      risk = "Střední";
     }
 
-    // --------------------------------------------------
-    // 19. LOG
-    // --------------------------------------------------
-
-    console.log(
-      "AEGRIS ANALYTICKÝ VÝSLEDEK:",
-      {
-        projectId,
-        latitude,
-        longitude,
-        hasBoundary:
-          boundary !== null,
-        boundaryPoints:
-          boundary?.length ?? 0,
-        startNdvi,
-        currentNdvi,
-        change,
-        trend,
-        risk,
-      }
-    );
-
-    // --------------------------------------------------
-    // 20. ODPOVĚĎ
-    // --------------------------------------------------
+    console.log("AEGRIS SENTINEL ANALYSIS:", {
+      projectId,
+      source: "Sentinel-2 L2A",
+      latitude,
+      longitude,
+      boundaryPoints: boundary.length,
+      analysisCrs: `EPSG:${analysisEpsg}`,
+      analysisUtmZone,
+      geometryPixelCount,
+      acceptedObservations: history.length,
+      rejectedObservations: rejectedIntervals.length,
+      qualityGatePct: MIN_VALID_GEOMETRY_PCT,
+      startNdvi,
+      currentNdvi,
+      medianNdvi: latest.medianNdvi,
+      p05Ndvi: latest.p05Ndvi,
+      p95Ndvi: latest.p95Ndvi,
+      validPixelCount: latest.validPixelCount,
+      validGeometryPct: latest.validGeometryPct,
+      change,
+      trend,
+      risk,
+    });
 
     return NextResponse.json({
       projectId,
       latitude,
       longitude,
-      hasBoundary:
-        boundary !== null,
-      boundaryPoints:
-        boundary?.length ?? 0,
-      from:
-        from.toISOString(),
-      to:
-        to.toISOString(),
-      count:
-        history.length,
-      ndvi:
-        currentNdvi,
+      hasBoundary: true,
+      boundaryPoints: boundary.length,
+      source: {
+        provider: "Copernicus Data Space Ecosystem",
+        satellite: "Sentinel-2",
+        product: "Sentinel-2 L2A",
+        spatialResolutionMeters: 10,
+        analysisCrs: `EPSG:${analysisEpsg}`,
+        analysisUtmZone,
+        aggregationInterval: "P10D",
+        ndviFormula: "(B08 - B04) / (B08 + B04)",
+        cloudMask:
+          "Sentinel-2 Scene Classification Layer (SCL) + dataMask",
+      },
+      quality: {
+        minValidGeometryPct: MIN_VALID_GEOMETRY_PCT,
+        geometryPixelCount,
+        acceptedIntervals: history.length,
+        rejectedIntervals: rejectedIntervals.length,
+        latestValidGeometryPct: latest.validGeometryPct,
+        latestValidPixelCount: latest.validPixelCount,
+      },
+      from: from.toISOString(),
+      to: to.toISOString(),
+      count: history.length,
+      ndvi: currentNdvi,
       startNdvi,
       currentNdvi,
+      medianNdvi: latest.medianNdvi,
+      p05Ndvi: latest.p05Ndvi,
+      p95Ndvi: latest.p95Ndvi,
+      minNdvi: latest.minNdvi,
+      maxNdvi: latest.maxNdvi,
+      sampleCount: latest.sampleCount,
+      noDataCount: latest.noDataCount,
+      validPixelCount: latest.validPixelCount,
+      geometryPixelCount,
+      validGeometryPct: latest.validGeometryPct,
       change,
       trend,
       risk,
       history,
-      raw: json,
+      rejectedIntervals,
     });
+    } finally {
+      const { error: unlockError } = await serviceSupabase
+        .from("analysis_locks")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("user_id", user.id);
+
+      if (unlockError) {
+        console.error("ANALYSIS UNLOCK ERROR:", unlockError);
+      }
+    }
   } catch (error) {
-    console.error(
-      "ANALYSIS ROUTE ERROR:",
-      error
-    );
+    console.error("ANALYSIS ROUTE ERROR:", error);
 
     return NextResponse.json(
       {
-        error:
-          "Chyba v analysis route",
-
+        error: "Chyba při získávání Sentinel-2 dat.",
         details:
           error instanceof Error
             ? error.message
             : String(error),
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

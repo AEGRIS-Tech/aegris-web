@@ -18,16 +18,53 @@ type Project = {
 };
 
 type AnalysisResult = {
+  id?: number;
   ndvi: number;
-  vegetation: number;
   risk: string;
   created_at?: string;
+  score?: number | null;
+  priority?: string | null;
+  valid_geometry_pct?: number | null;
+  source_provider?: string | null;
+  satellite_product?: string | null;
+};
+
+type DashboardCounts = {
+  projects: number;
+  analyses: number;
+  reports: number;
+  alerts: number;
+  unreadAlerts: number;
+  criticalProjects: number;
+};
+
+type DashboardProject = Project & {
+  latestAnalysis: AnalysisResult | null;
+  latestRecommendation: {
+    id: number;
+    analysis_id: number | null;
+    priority: string;
+    score: number | null;
+    created_at: string;
+  } | null;
+  unreadAlerts: number;
 };
 
 export default function DashboardPage() {
   const router = useRouter();
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [dashboardProjects, setDashboardProjects] =
+    useState<DashboardProject[]>([]);
+  const [dashboardCounts, setDashboardCounts] =
+    useState<DashboardCounts>({
+      projects: 0,
+      analyses: 0,
+      reports: 0,
+      alerts: 0,
+      unreadAlerts: 0,
+      criticalProjects: 0,
+    });
   const [user, setUser] = useState<User | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -51,48 +88,86 @@ export default function DashboardPage() {
   const [analysis, setAnalysis] =
     useState<AnalysisResult | null>(null);
 
-  const [analysisLoading, setAnalysisLoading] =
-    useState(false);
-
   const [analysisError, setAnalysisError] =
     useState("");
 
   // =========================================================
-  // LOAD LATEST ANALYSIS
+  // LOAD DASHBOARD SUMMARY
   // =========================================================
+
+  const loadDashboardSummary = useCallback(async () => {
+    try {
+      const response = await fetch("/api/dashboard", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error("CHYBA DASHBOARD API:", result);
+        return;
+      }
+
+      setDashboardCounts(result.counts);
+      setDashboardProjects(
+        Array.isArray(result.projects)
+          ? result.projects
+          : []
+      );
+    } catch (error) {
+      console.error("CHYBA NAČTENÍ DASHBOARDU:", error);
+    }
+  }, []);
 
   const loadLatestAnalysis = useCallback(
     async (projectId: number) => {
       setAnalysisError("");
 
-      const { data, error } = await supabase
-        .from("analysis")
-        .select(
-          "ndvi, vegetation, risk, created_at"
-        )
-        .eq("project_id", projectId)
-        .order("created_at", {
-          ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.error(
-          "CHYBA NAČTENÍ ANALÝZY:",
-          error
-        );
-        return;
-      }
-
-      if (data) {
-        setAnalysis({
-          ndvi: Number(data.ndvi),
-          vegetation: Number(data.vegetation),
-          risk: String(data.risk),
-          created_at: data.created_at,
+      try {
+        const response = await fetch("/api/dashboard", {
+          method: "GET",
+          cache: "no-store",
         });
-      } else {
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          console.error("CHYBA DASHBOARD API:", result);
+          setAnalysis(null);
+          return;
+        }
+
+        setDashboardCounts(result.counts);
+        setDashboardProjects(
+          Array.isArray(result.projects)
+            ? result.projects
+            : []
+        );
+
+        const projectData = Array.isArray(result.projects)
+          ? result.projects.find(
+              (item: DashboardProject) =>
+                item.id === projectId
+            )
+          : null;
+
+        const latest = projectData?.latestAnalysis ?? null;
+        const recommendation =
+          projectData?.latestRecommendation ?? null;
+
+        if (!latest) {
+          setAnalysis(null);
+          return;
+        }
+
+        setAnalysis({
+          ...latest,
+          score: recommendation?.score ?? null,
+          priority: recommendation?.priority ?? null,
+        });
+      } catch (error) {
+        console.error("CHYBA NAČTENÍ ANALÝZY:", error);
         setAnalysis(null);
       }
     },
@@ -125,6 +200,7 @@ export default function DashboardPage() {
         (data as Project[]) ?? [];
 
       setProjects(loadedProjects);
+      await loadDashboardSummary();
 
       // Automaticky vyber nejnovější projekt
       if (loadedProjects.length > 0) {
@@ -139,7 +215,7 @@ export default function DashboardPage() {
         }
       }
     },
-    [loadLatestAnalysis]
+    [loadDashboardSummary, loadLatestAnalysis]
   );
 
   // =========================================================
@@ -191,91 +267,16 @@ export default function DashboardPage() {
   }, [loadProjects, router]);
 
   // =========================================================
-  // AI ANALYSIS
+  // ANALYSIS ENTRY POINT
   // =========================================================
 
-  async function runAIAnalysis() {
+  function openSelectedProjectAnalysis() {
     if (!selectedProject.id) {
       setAnalysisError("Není vybrán žádný projekt.");
       return;
     }
 
-    setAnalysisLoading(true);
-    setAnalysisError("");
-
-    try {
-      const response = await fetch(
-        `/api/analysis?projectId=${selectedProject.id}`,
-        {
-          method: "GET",
-          cache: "no-store",
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        console.error(
-          "ANALÝZA API CHYBA:",
-          result
-        );
-
-        throw new Error(
-          result?.error ||
-            "Analýzu se nepodařilo dokončit."
-        );
-      }
-
-      const ndvi =
-        result?.currentNdvi ??
-        result?.ndvi ??
-        null;
-
-      if (
-        ndvi === null ||
-        !Number.isFinite(Number(ndvi))
-      ) {
-        throw new Error(
-          "API analýzy nevrátilo platnou NDVI hodnotu."
-        );
-      }
-
-      setAnalysis({
-        ndvi: Number(ndvi),
-
-        // Dashboard zatím zachovává původní datový model.
-        // Skutečné rozhodnutí nyní vzniká v decision engine.
-        vegetation: Math.round(
-          Math.max(
-            0,
-            Math.min(
-              100,
-              Number(ndvi) * 100
-            )
-          )
-        ),
-
-        risk:
-          result?.risk ??
-          "Vyhodnoceno",
-
-        created_at:
-          new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error(
-        "AI ANALÝZA CHYBA:",
-        error
-      );
-
-      setAnalysisError(
-        error instanceof Error
-          ? error.message
-          : "Analýza se nepodařila dokončit."
-      );
-    } finally {
-      setAnalysisLoading(false);
-    }
+    router.push(`/projects/${selectedProject.id}`);
   }
 
   // =========================================================
@@ -689,7 +690,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-3 text-5xl font-black text-cyan-400">
-                    {projects.length}
+                    {dashboardCounts.projects}
                   </div>
                 </div>
 
@@ -712,7 +713,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-3 text-5xl font-black text-emerald-400">
-                    {analysis ? "1" : "0"}
+                    {dashboardCounts.analyses}
                   </div>
                 </div>
 
@@ -735,7 +736,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-3 text-5xl font-black text-yellow-400">
-                    0
+                    {dashboardCounts.reports}
                   </div>
                 </div>
 
@@ -758,7 +759,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-3 text-5xl font-black text-red-400">
-                    0
+                    {dashboardCounts.unreadAlerts}
                   </div>
                 </div>
 
@@ -908,11 +909,13 @@ export default function DashboardPage() {
                     <div className="mt-5 flex items-center justify-between border-t border-slate-800 pt-4">
 
                       <span className="text-sm text-slate-500">
-                        Vegetace
+                        AEGRIS skóre
                       </span>
 
-                      <span className="font-bold text-green-400">
-                        {analysis.vegetation}%
+                      <span className="font-bold text-amber-400">
+                        {analysis.score != null
+                          ? `${analysis.score} / 100`
+                          : "—"}
                       </span>
 
                     </div>
@@ -949,20 +952,15 @@ export default function DashboardPage() {
 
               <button
                 type="button"
-                onClick={runAIAnalysis}
-                disabled={
-                  analysisLoading ||
-                  !selectedProject.id
-                }
+                onClick={openSelectedProjectAnalysis}
+                disabled={!selectedProject.id}
                 className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="text-lg">
                   🧠
                 </span>
 
-                {analysisLoading
-                  ? "Probíhá analýza..."
-                  : "Spustit AI analýzu"}
+                Otevřít projekt a spustit analýzu
               </button>
 
             </div>

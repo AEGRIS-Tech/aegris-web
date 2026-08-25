@@ -6,20 +6,26 @@ import Map, {
   Marker,
   NavigationControl,
   ScaleControl,
+  Source,
+  Layer,
   type MapRef,
 } from "react-map-gl/maplibre";
 
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import type { Geometry } from "geojson";
+
 type Props = {
   latitude: number;
   longitude: number;
+  boundary?: Geometry | null;
 };
 
 export default function ProjectMap({
   latitude,
   longitude,
+  boundary,
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
 
@@ -55,6 +61,14 @@ export default function ProjectMap({
     ],
   };
 
+  const boundaryGeoJson = boundary
+    ? {
+        type: "Feature" as const,
+        properties: {},
+        geometry: boundary,
+      }
+    : null;
+
   return (
     <div className="relative h-[420px] w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950">
       <Map
@@ -82,6 +96,35 @@ export default function ProjectMap({
           position="bottom-left"
           unit="metric"
         />
+
+        {boundaryGeoJson && (
+          <Source
+            id="project-boundary"
+            type="geojson"
+            data={boundaryGeoJson}
+          >
+            {/* Výplň pole */}
+            <Layer
+              id="project-boundary-fill"
+              type="fill"
+              paint={{
+                "fill-color": "#06b6d4",
+                "fill-opacity": 0.12,
+              }}
+            />
+
+            {/* Hranice pole */}
+            <Layer
+              id="project-boundary-line"
+              type="line"
+              paint={{
+                "line-color": "#22d3ee",
+                "line-width": 3,
+                "line-opacity": 0.95,
+              }}
+            />
+          </Source>
+        )}
 
         <Marker
           longitude={longitude}
