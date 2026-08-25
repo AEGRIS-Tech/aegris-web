@@ -158,30 +158,33 @@ export default function DashboardPage() {
       }
 
       const { data: profile, error: profileError } =
-  await supabase
-    .from("profiles")
-    .select("account_type, demo_expires_at")
-    .eq("id", user.id)
-    .maybeSingle();
+        await supabase
+          .from("profiles")
+          .select("account_type, demo_expires_at")
+          .eq("id", user.id)
+          .maybeSingle();
 
-if (profileError) {
-  console.error("CHYBA NAČTENÍ PROFILU:", profileError);
-  router.push("/login");
-  return;
-}
+      if (profileError) {
+        console.error(
+          "CHYBA NAČTENÍ PROFILU:",
+          profileError
+        );
+        router.push("/login");
+        return;
+      }
 
-if (
-  profile?.account_type === "demo" &&
-  profile.demo_expires_at &&
-  new Date(profile.demo_expires_at) <= new Date()
-) {
-  router.push("/login");
-  return;
-}
+      if (
+        profile?.account_type === "demo" &&
+        profile.demo_expires_at &&
+        new Date(profile.demo_expires_at) <= new Date()
+      ) {
+        router.push("/login");
+        return;
+      }
 
-setUser(user);
+      setUser(user);
 
-await loadProjects(user.id);
+      await loadProjects(user.id);
     }
 
     init();
@@ -192,87 +195,90 @@ await loadProjects(user.id);
   // =========================================================
 
   async function runAIAnalysis() {
-  if (!selectedProject.id) {
-    setAnalysisError("Není vybrán žádný projekt.");
-    return;
-  }
+    if (!selectedProject.id) {
+      setAnalysisError("Není vybrán žádný projekt.");
+      return;
+    }
 
-  setAnalysisLoading(true);
-  setAnalysisError("");
+    setAnalysisLoading(true);
+    setAnalysisError("");
 
-  try {
-    const response = await fetch(
-      `/api/analysis?projectId=${selectedProject.id}`,
-      {
-        method: "GET",
-        cache: "no-store",
+    try {
+      const response = await fetch(
+        `/api/analysis?projectId=${selectedProject.id}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error(
+          "ANALÝZA API CHYBA:",
+          result
+        );
+
+        throw new Error(
+          result?.error ||
+            "Analýzu se nepodařilo dokončit."
+        );
       }
-    );
 
-    const result = await response.json();
+      const ndvi =
+        result?.currentNdvi ??
+        result?.ndvi ??
+        null;
 
-    if (!response.ok) {
-      console.error("ANALÝZA API CHYBA:", result);
+      if (
+        ndvi === null ||
+        !Number.isFinite(Number(ndvi))
+      ) {
+        throw new Error(
+          "API analýzy nevrátilo platnou NDVI hodnotu."
+        );
+      }
 
-      throw new Error(
-        result?.error ||
-          "Analýzu se nepodařilo dokončit."
-      );
-    }
+      setAnalysis({
+        ndvi: Number(ndvi),
 
-    const ndvi =
-      result?.currentNdvi ??
-      result?.ndvi ??
-      null;
-
-    if (
-      ndvi === null ||
-      !Number.isFinite(Number(ndvi))
-    ) {
-      throw new Error(
-        "API analýzy nevrátilo platnou NDVI hodnotu."
-      );
-    }
-
-    setAnalysis({
-      ndvi: Number(ndvi),
-
-      // Dashboard zatím zachovává původní datový model.
-      // Skutečné rozhodnutí nyní vzniká v decision engine.
-      vegetation: Math.round(
-        Math.max(
-          0,
-          Math.min(
-            100,
-            Number(ndvi) * 100
+        // Dashboard zatím zachovává původní datový model.
+        // Skutečné rozhodnutí nyní vzniká v decision engine.
+        vegetation: Math.round(
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(ndvi) * 100
+            )
           )
-        )
-      ),
+        ),
 
-      risk:
-        result?.risk ??
-        "Vyhodnoceno",
+        risk:
+          result?.risk ??
+          "Vyhodnoceno",
 
-      created_at:
-        new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error(
-      "AI ANALÝZA CHYBA:",
-      error
-    );
+        created_at:
+          new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(
+        "AI ANALÝZA CHYBA:",
+        error
+      );
 
-    setAnalysisError(
-      error instanceof Error
-        ? error.message
-        : "Analýza se nepodařila dokončit."
-    );
-  } finally {
-    setAnalysisLoading(false);
+      setAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "Analýza se nepodařila dokončit."
+      );
+    } finally {
+      setAnalysisLoading(false);
+    }
   }
-}
 
-// =========================================================
+  // =========================================================
   // SELECT PROJECT
   // =========================================================
 
@@ -285,6 +291,7 @@ await loadProjects(user.id);
       await loadLatestAnalysis(project.id);
     }
   }
+
   // =========================================================
   // LOGOUT
   // =========================================================
@@ -505,17 +512,8 @@ await loadProjects(user.id);
 
             {/* MAPA */}
 
-            <button
-              type="button"
-              onClick={() =>
-                document
-                  .getElementById(
-                    "dashboard-map"
-                  )
-                  ?.scrollIntoView({
-                    behavior: "smooth",
-                  })
-              }
+            <Link
+              href="/map"
               className="group flex w-full items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-emerald-400/30 hover:bg-slate-800"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400/10 text-xl">
@@ -531,7 +529,7 @@ await loadProjects(user.id);
                   Lokality projektů
                 </div>
               </div>
-            </button>
+            </Link>
 
             {/* PROJEKTY */}
 
@@ -556,8 +554,8 @@ await loadProjects(user.id);
 
             {/* REPORTY */}
 
-            <button
-              type="button"
+            <Link
+              href="/reports"
               className="group flex w-full items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-yellow-400/30 hover:bg-slate-800"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-yellow-400/10 text-xl">
@@ -573,12 +571,12 @@ await loadProjects(user.id);
                   Výsledky analýz
                 </div>
               </div>
-            </button>
+            </Link>
 
             {/* SETTINGS */}
 
-            <button
-              type="button"
+            <Link
+              href="/settings"
               className="group flex w-full items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-800"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-xl">
@@ -594,7 +592,7 @@ await loadProjects(user.id);
                   Nastavení platformy
                 </div>
               </div>
-            </button>
+            </Link>
 
             {/* AEGRIS CARD */}
 
@@ -1103,13 +1101,13 @@ await loadProjects(user.id);
                     </button>
 
                     {project.id && (
-  <Link
-    href={`/projects/${project.id}`}
-    className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
-  >
-    Otevřít detail projektu →
-  </Link>
-)}
+                      <Link
+                        href={`/projects/${project.id}`}
+                        className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
+                      >
+                        Otevřít detail projektu →
+                      </Link>
+                    )}
 
                     <button
                       type="button"
