@@ -667,11 +667,6 @@ export async function GET(request: Request) {
 
     const responseText = await statisticsResponse.text();
 
-    console.log(
-      "COPERNICUS STATISTICS STATUS:",
-      statisticsResponse.status
-    );
-
     if (!statisticsResponse.ok) {
       console.error("COPERNICUS STATISTICS ERROR:", responseText);
       return NextResponse.json(
@@ -911,30 +906,6 @@ export async function GET(request: Request) {
     } else if (currentNdvi < 0.60) {
       risk = "Střední";
     }
-
-    console.log("AEGRIS SENTINEL ANALYSIS:", {
-      projectId,
-      source: "Sentinel-2 L2A",
-      latitude,
-      longitude,
-      boundaryPoints: boundary.length,
-      analysisCrs: `EPSG:${analysisEpsg}`,
-      analysisUtmZone,
-      geometryPixelCount,
-      acceptedObservations: history.length,
-      rejectedObservations: rejectedIntervals.length,
-      qualityGatePct: MIN_VALID_GEOMETRY_PCT,
-      startNdvi,
-      currentNdvi,
-      medianNdvi: latest.medianNdvi,
-      p05Ndvi: latest.p05Ndvi,
-      p95Ndvi: latest.p95Ndvi,
-      validPixelCount: latest.validPixelCount,
-      validGeometryPct: latest.validGeometryPct,
-      change,
-      trend,
-      risk,
-    });
 
     return NextResponse.json({
       projectId,

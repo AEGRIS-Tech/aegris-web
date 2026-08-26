@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
   const response = NextResponse.next({
-  request,
+    request,
   });
 
   const supabase = createServerClient(
@@ -27,17 +27,9 @@ export async function updateSession(request: NextRequest) {
 
   const {
     data: { user },
-    error,
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
-
-  console.log("========== AEGRIS PROXY ==========");
-  console.log("PATH:", pathname);
-  console.log("COOKIE COUNT:", request.cookies.getAll().length);
-  console.log("USER:", user?.email ?? "ŽÁDNÝ UŽIVATEL");
-  console.log("ERROR:", error?.message ?? "null");
-  console.log("===================================");
 
   const protectedRoutes = [
     "/dashboard",
@@ -55,10 +47,6 @@ export async function updateSession(request: NextRequest) {
 
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
-
-    console.log(
-      "AEGRIS PROXY: NEPŘIHLÁŠENÝ → LOGIN"
-    );
 
     return NextResponse.redirect(url);
   }

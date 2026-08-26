@@ -1948,12 +1948,6 @@ export function evaluateProjectContext(
         ) / totalWeight
       : 0;
 
-      console.log("AEGRIS SCORE DEBUG", {
-        availableFactors,
-        totalWeight,
-        weightedScore,
-      });
-
   const score =
     Math.round(
       clampScore(weightedScore)

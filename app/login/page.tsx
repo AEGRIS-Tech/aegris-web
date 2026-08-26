@@ -43,11 +43,6 @@ export default function LoginPage() {
         return;
       }
 
-      console.log(
-        "AEGRIS LOGIN SUCCESS:",
-        data.user.email
-      );
-
       // Ověření, že browser session opravdu existuje.
       const {
         data: sessionData,

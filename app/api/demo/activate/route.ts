@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     let processed = 0;
     let failed = 0;
 
-    // Budeme vracet odkazy pro lokální test.
+    // Odkazy se vrací pouze autorizovanému volajícímu endpointu.
     const activations: Array<{
       id: number;
       email: string;
@@ -146,10 +146,6 @@ export async function POST(request: Request) {
 
         if (existingUser) {
           userId = existingUser.id;
-
-          console.log(
-            `AUTH UŽIVATEL UŽ EXISTUJE: ${demoRequest.email} | ${userId}`
-          );
         }
 
         // ========================================
@@ -192,10 +188,6 @@ export async function POST(request: Request) {
             failed++;
             continue;
           }
-
-          console.log(
-            `AUTH ÚČET VYTVOŘEN: ${demoRequest.email} | ${userId}`
-          );
         }
 
         // ========================================
@@ -245,18 +237,15 @@ export async function POST(request: Request) {
           continue;
         }
 
-        console.log(
-          `DEMO PROFIL VYTVOŘEN: ${demoRequest.email}`
-        );
-
         // ========================================
         // VYTVOŘENÍ SUPABASE PŘÍMÉHO ODKAZU
         // ========================================
         //
         // NEPOSÍLÁME E-MAIL.
         //
-        // Supabase pouze vytvoří jednorázový odkaz,
-        // který vrátíme přímo v JSON odpovědi.
+        // Supabase vytvoří jednorázový odkaz,
+        // který vrátíme přímo v JSON odpovědi
+        // autorizovanému volajícímu endpointu.
         //
         // U nového účtu použijeme invite.
         // U existujícího účtu použijeme magiclink.
@@ -300,26 +289,20 @@ export async function POST(request: Request) {
           continue;
         }
 
-        console.log(
-          `PŘÍMÝ DEMO ODKAZ VYTVOŘEN PRO ${demoRequest.email}:`
-        );
-
-        console.log(inviteUrl);
-
         // ========================================
         // OZNAČENÍ ŽÁDOSTI JAKO AKTIVOVANÉ
         // ========================================
 
         const { error: updateError } =
-  await supabaseAdmin
-    .from("demo_requests")
-    .update({
-      user_id: userId,
-      approved_at: startedAtIso,
-    })
-    .eq("id", demoRequest.id)
-    .is("user_id", null)
-    .is("approved_at", null);
+          await supabaseAdmin
+            .from("demo_requests")
+            .update({
+              user_id: userId,
+              approved_at: startedAtIso,
+            })
+            .eq("id", demoRequest.id)
+            .is("user_id", null)
+            .is("approved_at", null);
 
         if (updateError) {
           console.error(
@@ -344,12 +327,6 @@ export async function POST(request: Request) {
           inviteUrl,
           expiresAt: expiresAtIso,
         });
-
-        console.log(
-          `DEMO AKTIVOVÁNO: ${demoRequest.email} | ` +
-            `od ${startedAtIso} | ` +
-            `do ${expiresAtIso}`
-        );
       } catch (error) {
         console.error(
           `CHYBA ZPRACOVÁNÍ DEMO ${demoRequest.email}:`,

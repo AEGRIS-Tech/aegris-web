@@ -609,11 +609,6 @@ export default function WorldMap({
           zoom: 6,
         }}
         mapStyle="https://tiles.openfreemap.org/styles/liberty"
-        onLoad={() => {
-          console.log(
-            "✅ AEGRIS MAP LOAD OK"
-          );
-        }}
         onClick={(event) => {
           const {
             lng,
@@ -638,12 +633,6 @@ export default function WorldMap({
           /*
            * Původní chování mapy
            */
-          console.log(
-            "📍 Kliknutí na mapu:",
-            lat,
-            lng
-          );
-
           onMapClick?.({
             latitude: lat,
             longitude: lng,
@@ -793,11 +782,6 @@ export default function WorldMap({
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-
-                    console.log(
-                      "📍 Kliknutý projekt:",
-                      project.name
-                    );
 
                     onLocationSelect?.(
                       project

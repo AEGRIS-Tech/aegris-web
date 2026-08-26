@@ -48,16 +48,12 @@ export default function TerraDrawControl() {
         ],
       });
 
-      console.log("Starting TerraDraw");
-
       draw.current.start();
 
       draw.current.setMode("polygon");
     });
 
     return () => {
-      console.log("Stopping TerraDraw");
-
       draw.current?.stop();
 
       draw.current = null;
