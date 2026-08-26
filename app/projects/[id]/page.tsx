@@ -229,8 +229,7 @@ if (soilProfileError) {
 
 try {
   await loadWeather(
-    currentProject.latitude,
-    currentProject.longitude
+    currentProject.id
   );
 } catch (error) {
   console.error(
@@ -416,13 +415,13 @@ useEffect(() => {
 }, [params.id]);
 /* eslint-enable react-hooks/set-state-in-effect */
 
-  async function loadWeather(latitude: number, longitude: number) {
+  async function loadWeather(projectId: number) {
 
   setLoadingWeather(true);
 
   try {
     const response = await fetch(
-      `/api/weather?latitude=${latitude}&longitude=${longitude}`,
+      `/api/weather?projectId=${projectId}`,
       {
         cache: "no-store",
       }
@@ -1498,7 +1497,7 @@ const {
 
         {/* 5. WEATHER */}
         <section className="mt-3 rounded-xl border border-slate-800 bg-[#071225]/95 p-4">
-          <div className="flex items-center justify-between gap-3"><div><div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">POČASÍ A PODMÍNKY</div><h2 className="mt-1 text-sm font-black">AKTUÁLNÍ PODMÍNKY V LOKALITĚ</h2></div><button type="button" onClick={() => loadWeather(project.latitude, project.longitude)} disabled={loadingWeather} className="rounded-lg border border-slate-800 px-3 py-2 text-[8px] font-bold text-slate-400 hover:border-cyan-400 hover:text-cyan-400 disabled:opacity-50">↻ Obnovit</button></div>
+          <div className="flex items-center justify-between gap-3"><div><div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">POČASÍ A PODMÍNKY</div><h2 className="mt-1 text-sm font-black">AKTUÁLNÍ PODMÍNKY V LOKALITĚ</h2></div><button type="button" onClick={() => loadWeather(project.id)} disabled={loadingWeather} className="rounded-lg border border-slate-800 px-3 py-2 text-[8px] font-bold text-slate-400 hover:border-cyan-400 hover:text-cyan-400 disabled:opacity-50">↻ Obnovit</button></div>
           {weather ? <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4"><div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[8px] text-slate-500">Teplota</div><div className="mt-1 text-lg font-black text-orange-400">{weather.temperature_c != null ? `${weather.temperature_c.toFixed(1)} °C` : "—"}</div><div className={`text-[8px] ${temperatureStatusClass}`}>{temperatureStatus}</div></div><div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[8px] text-slate-500">Vlhkost</div><div className="mt-1 text-lg font-black text-cyan-400">{weather.humidity_pct != null ? `${weather.humidity_pct.toFixed(0)} %` : "—"}</div><div className="text-[8px] text-cyan-400">Aktuální</div></div><div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[8px] text-slate-500">Srážky – poslední hodina</div><div className="mt-1 text-lg font-black">{weather.precipitation_mm != null ? `${weather.precipitation_mm.toFixed(1)} mm` : "—"}</div><div className="text-[8px] text-slate-500">Aktuální</div></div><div className="rounded-lg border border-slate-800 bg-[#061022] p-3"><div className="text-[8px] text-slate-500">Vítr</div><div className="mt-1 text-lg font-black">{weather.wind_speed_kmh != null ? `${weather.wind_speed_kmh.toFixed(1)} km/h` : "—"}</div><div className="text-[8px] text-emerald-400">Aktuální</div></div></div> : <div className="mt-3 text-[9px] text-slate-500">{loadingWeather ? "Načítám počasí..." : "Počasí se nepodařilo načíst."}</div>}
         </section>
 
