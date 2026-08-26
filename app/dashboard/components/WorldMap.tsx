@@ -10,7 +10,14 @@ import Map, {
   type MapRef,
 } from "react-map-gl/maplibre";
 
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+
+if (typeof window !== "undefined") {
+  maplibregl.setWorkerUrl(
+    "/maplibre/maplibre-gl-worker.mjs"
+  );
+}
 
 type Project = {
   id?: number;

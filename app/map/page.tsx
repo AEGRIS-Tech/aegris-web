@@ -61,7 +61,7 @@ export default function MapPage() {
 
   useEffect(() => {
     maplibregl.setWorkerUrl(
-      "https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl-csp-worker.js"
+      "/maplibre/maplibre-gl-worker.mjs"
     );
   }, []);
 

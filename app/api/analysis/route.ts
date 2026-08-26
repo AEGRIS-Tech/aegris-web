@@ -105,24 +105,6 @@ function isValidBoundary(value: unknown): value is BoundaryPoint[] {
   });
 }
 
-function createPolygon(boundary: BoundaryPoint[]) {
-  const coordinates = boundary.map((point) => [
-    Number(point.longitude),
-    Number(point.latitude),
-  ]);
-
-  const first = coordinates[0];
-  const last = coordinates[coordinates.length - 1];
-
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    coordinates.push([first[0], first[1]]);
-  }
-
-  return {
-    type: "Polygon" as const,
-    coordinates: [coordinates],
-  };
-}
 
 /*
  * WGS84 longitude/latitude -> WGS84 / UTM.

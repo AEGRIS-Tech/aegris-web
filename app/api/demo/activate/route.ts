@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       new URL(request.url).origin;
 
     const redirectTo =
-      `${appUrl}/auth/accept-invite`;
+      `${appUrl}/auth/callback?next=${encodeURIComponent("/auth/accept-invite")}`;
 
     // ============================================
     // NAČTENÍ NOVÝCH DEMO ŽÁDOSTÍ

@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase";
 
 export default function AcceptInvitePage() {
   const router = useRouter();
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [password, setPassword] = useState("");
@@ -14,27 +13,39 @@ export default function AcceptInvitePage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
+    let timeoutId: number | null = null;
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+
+      if (
+        session &&
+        (event === "SIGNED_IN" ||
+          event === "INITIAL_SESSION" ||
+          event === "PASSWORD_RECOVERY")
+      ) {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        setLoading(false);
+      }
+    });
 
     async function initializeSession() {
-      setErrorMessage("");
-
-      // Supabase po kliknutí na magic link zpracuje
-      // access token z URL a vytvoří browser session.
       const {
         data: { session },
         error,
       } = await supabase.auth.getSession();
 
-      if (!mounted) return;
+      if (!active) return;
 
       if (error) {
         console.error("DEMO SESSION ERROR:", error);
-
-        setErrorMessage(
-          "Pozvánku se nepodařilo ověřit."
-        );
-
+        setErrorMessage("Pozvánku se nepodařilo ověřit.");
         setLoading(false);
         return;
       }
@@ -44,50 +55,21 @@ export default function AcceptInvitePage() {
         return;
       }
 
-      // Session může být vytvořena o chvíli později
-      // při zpracování magic linku.
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange(
-        (event, newSession) => {
-          if (!mounted) return;
-
-          if (
-            (event === "SIGNED_IN" ||
-              event === "INITIAL_SESSION") &&
-            newSession
-          ) {
-            setLoading(false);
-          }
-        }
-      );
-
-      // Pokud Supabase session nevytvoří,
-      // zobrazíme chybu místo nekonečného načítání.
-      const timeout = window.setTimeout(() => {
-        if (!mounted) return;
-
-        setLoading((current) => {
-          if (current) {
-            setErrorMessage(
-              "Pozvánka je neplatná nebo již vypršela."
-            );
-          }
-
-          return false;
-        });
+      timeoutId = window.setTimeout(() => {
+        if (!active) return;
+        setErrorMessage("Pozvánka je neplatná nebo již vypršela.");
+        setLoading(false);
       }, 5000);
-
-      return () => {
-        window.clearTimeout(timeout);
-        subscription.unsubscribe();
-      };
     }
 
-    initializeSession();
+    void initializeSession();
 
     return () => {
-      mounted = false;
+      active = false;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -97,75 +79,47 @@ export default function AcceptInvitePage() {
     setErrorMessage("");
 
     if (password.length < 8) {
-      setErrorMessage(
-        "Heslo musí mít alespoň 8 znaků."
-      );
+      setErrorMessage("Heslo musí mít alespoň 8 znaků.");
       return;
     }
 
     if (password !== confirmPassword) {
-      setErrorMessage(
-        "Hesla se neshodují."
-      );
+      setErrorMessage("Hesla se neshodují.");
       return;
     }
 
     setSaving(true);
 
     try {
-      // Ověříme, že browser stále má Supabase session.
       const {
         data: { session },
         error: sessionError,
       } = await supabase.auth.getSession();
 
       if (sessionError || !session) {
-        console.error(
-          "DEMO SESSION CHECK ERROR:",
-          sessionError
-        );
-
+        console.error("DEMO SESSION CHECK ERROR:", sessionError);
         setErrorMessage(
           "Přihlášení z pozvánky se nepodařilo dokončit. Otevřete prosím aktivační odkaz znovu."
         );
-
-        setSaving(false);
         return;
       }
 
-      // Heslo nastavujeme přímo na aktuální Supabase session.
-      const { error: updateError } =
-        await supabase.auth.updateUser({
-          password,
-        });
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+      });
 
       if (updateError) {
-        console.error(
-          "DEMO PASSWORD UPDATE ERROR:",
-          updateError
-        );
-
-        setErrorMessage(
-          "Heslo se nepodařilo nastavit."
-        );
-
-        setSaving(false);
+        console.error("DEMO PASSWORD UPDATE ERROR:", updateError);
+        setErrorMessage("Heslo se nepodařilo nastavit.");
         return;
       }
 
-      // Profil už máme vytvořený v API /activate.
-      // Teď už jen přejdeme do aplikace.
       router.replace("/dashboard");
+      router.refresh();
     } catch (error) {
-      console.error(
-        "DEMO ACCEPT CLIENT ERROR:",
-        error
-      );
-
-      setErrorMessage(
-        "Nepodařilo se dokončit DEMO účet."
-      );
-
+      console.error("DEMO ACCEPT CLIENT ERROR:", error);
+      setErrorMessage("Nepodařilo se dokončit DEMO účet.");
+    } finally {
       setSaving(false);
     }
   }
@@ -173,90 +127,72 @@ export default function AcceptInvitePage() {
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-        <div className="text-slate-400">
-          Ověřuji DEMO účet...
-        </div>
+        <div className="text-slate-400">Ověřuji DEMO účet...</div>
       </main>
     );
   }
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
-      <div className="w-full max-w-md rounded-3xl bg-slate-900 p-8 shadow-2xl">
+      <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-cyan-400">
-            AEGRIS
-          </h1>
-
-          <p className="mt-3 text-slate-400">
-            Dokončení DEMO účtu
-          </p>
+          <h1 className="text-4xl font-bold text-cyan-400">AEGRIS</h1>
+          <p className="mt-3 text-slate-400">Dokončení DEMO účtu</p>
         </div>
 
-        {errorMessage ? (
+        {errorMessage && !password && !confirmPassword ? (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-400">
             {errorMessage}
           </div>
         ) : (
           <>
             <p className="mb-6 text-sm leading-6 text-slate-400">
-              Nastavte si heslo pro přístup do vašeho
-              AEGRIS DEMO účtu.
+              Nastavte si heslo pro přístup do vašeho AEGRIS DEMO účtu.
             </p>
 
-            <div className="mb-4">
-              <label
-                htmlFor="password"
-                className="mb-2 block text-sm font-semibold text-slate-300"
-              >
-                Nové heslo
-              </label>
+            <label htmlFor="password" className="mb-2 block text-sm font-semibold text-slate-300">
+              Nové heslo
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder="Minimálně 8 znaků"
+              disabled={saving}
+              minLength={8}
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-white outline-none focus:border-cyan-400 disabled:opacity-50"
+            />
 
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(event) =>
-                  setPassword(event.target.value)
-                }
-                autoComplete="new-password"
-                placeholder="Minimálně 8 znaků"
-                disabled={saving}
-                className="w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-white outline-none focus:border-cyan-400 disabled:opacity-50"
-              />
-            </div>
+            <label htmlFor="confirmPassword" className="mb-2 mt-4 block text-sm font-semibold text-slate-300">
+              Potvrzení hesla
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder="Zopakujte heslo"
+              disabled={saving}
+              minLength={8}
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-white outline-none focus:border-cyan-400 disabled:opacity-50"
+            />
 
-            <div className="mb-6">
-              <label
-                htmlFor="confirmPassword"
-                className="mb-2 block text-sm font-semibold text-slate-300"
-              >
-                Potvrzení hesla
-              </label>
-
-              <input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(event) =>
-                  setConfirmPassword(event.target.value)
-                }
-                autoComplete="new-password"
-                placeholder="Zopakujte heslo"
-                disabled={saving}
-                className="w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-white outline-none focus:border-cyan-400 disabled:opacity-50"
-              />
-            </div>
+            {errorMessage && (
+              <div className="mt-5 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-400">
+                {errorMessage}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={handleSetPassword}
+              onClick={() => void handleSetPassword()}
               disabled={saving}
-              className="w-full rounded-xl bg-cyan-500 py-3 font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-6 w-full rounded-xl bg-cyan-500 py-3 font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving
-                ? "Nastavuji účet..."
-                : "Dokončit DEMO účet"}
+              {saving ? "Nastavuji účet..." : "Dokončit DEMO účet"}
             </button>
           </>
         )}

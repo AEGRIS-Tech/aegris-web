@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
 import { useParams, useRouter } from "next/navigation";
-import ProjectMap from "./ProjectMap";
 import AnalysisChart from "./AnalysisChart";
+
+const ProjectMap = dynamic(() => import("./ProjectMap"), { ssr: false });
 
 type Project = {
   id: number;
@@ -412,7 +414,7 @@ useEffect(() => {
 
   void loadCropProfiles();
   void loadCropStageProfiles();
-}, [params.id]);
+}, [loadProject, params.id]);
 /* eslint-enable react-hooks/set-state-in-effect */
 
   async function loadWeather(projectId: number) {

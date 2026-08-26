@@ -1,12 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
-import WorldMap from "./components/WorldMap";
 import NewProjectModal from "./components/NewProjectModal";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+
+const WorldMap = dynamic(() => import("./components/WorldMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+      Načítám mapu...
+    </div>
+  ),
+});
 
 type Project = {
   id?: number;
@@ -54,7 +63,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [dashboardProjects, setDashboardProjects] =
+  const [, setDashboardProjects] =
     useState<DashboardProject[]>([]);
   const [dashboardCounts, setDashboardCounts] =
     useState<DashboardCounts>({

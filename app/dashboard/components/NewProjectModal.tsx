@@ -1,8 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 
-import WorldMap from "./WorldMap";
+const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
+
 
 type BoundaryPoint = {
   latitude: number;
