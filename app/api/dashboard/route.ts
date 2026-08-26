@@ -446,10 +446,6 @@ export async function GET() {
       {
         error:
           "Neočekávaná chyba dashboardu.",
-        details:
-          error instanceof Error
-            ? error.message
-            : String(error),
       },
       { status: 500 }
     );

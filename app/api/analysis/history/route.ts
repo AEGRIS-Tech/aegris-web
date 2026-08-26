@@ -142,8 +142,6 @@ export async function GET(request: Request) {
         {
           error:
             "Nepodařilo se ověřit přístup k projektu.",
-          details:
-            projectError.message,
         },
         { status: 500 }
       );
@@ -192,8 +190,6 @@ export async function GET(request: Request) {
         {
           error:
             "Nepodařilo se načíst NDVI historii.",
-          details:
-            historyError.message,
         },
         { status: 500 }
       );
@@ -291,10 +287,6 @@ export async function GET(request: Request) {
       {
         error:
           "Neočekávaná chyba serveru.",
-        details:
-          error instanceof Error
-            ? error.message
-            : String(error),
       },
       { status: 500 }
     );

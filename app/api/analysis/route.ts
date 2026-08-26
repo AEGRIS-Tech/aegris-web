@@ -972,10 +972,6 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: "Chyba při získávání Sentinel-2 dat.",
-        details:
-          error instanceof Error
-            ? error.message
-            : String(error),
       },
       {
         status: 500,
