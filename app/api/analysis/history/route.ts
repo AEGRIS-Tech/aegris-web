@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { requireAccountAccess } from "@/lib/auth/account-access";
 
 export const dynamic = "force-dynamic";
 
@@ -75,20 +76,20 @@ export async function GET(request: Request) {
      * --------------------------------------------------
      */
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const access =
+      await requireAccountAccess(supabase);
 
-    if (userError || !user) {
+    if (!access.ok) {
       return NextResponse.json(
         {
-          error:
-            "Uživatel není přihlášen.",
+          error: access.message,
+          code: access.code,
         },
-        { status: 401 }
+        { status: access.status }
       );
     }
+
+    const { user } = access;
 
     /*
      * --------------------------------------------------
