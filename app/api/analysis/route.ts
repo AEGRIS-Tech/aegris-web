@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { fetchProjectWeather } from "@/lib/server/weather";
+import {
+  evaluateProjectContext,
+  type CropProfile,
+  type CropStageProfile,
+  type ProjectSoilProfile,
+  type NdviHistory,
+} from "@/lib/supabase/aegris/decision-engine";
 
 export const dynamic = "force-dynamic";
 
@@ -247,7 +255,7 @@ function getPercentile(
   return null;
 }
 
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
 
@@ -326,7 +334,7 @@ export async function GET(request: Request) {
 
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id, latitude, longitude, boundary, user_id")
+      .select("id, latitude, longitude, boundary, user_id, crop_name, growth_stage")
       .eq("id", projectId)
       .eq("user_id", user.id)
       .single();
@@ -889,8 +897,185 @@ export async function GET(request: Request) {
       risk = "Střední";
     }
 
+    // ---------------------------------------------------------
+    // SERVER-AUTHORITATIVE AEGRIS PERSISTENCE
+    // ---------------------------------------------------------
+    const analysisCreatedAt = new Date().toISOString();
+    const cropName = typeof project.crop_name === "string" ? project.crop_name : "";
+    const growthStage = typeof project.growth_stage === "string" ? project.growth_stage : "";
+
+    const [cropResult, soilResult] = await Promise.all([
+      cropName
+        ? serviceSupabase.from("crop_profiles").select("*").eq("name", cropName).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      serviceSupabase.from("project_soil_profiles").select("*").eq("project_id", projectId).maybeSingle(),
+    ]);
+
+    if (cropResult.error) console.error("ANALYSIS CROP PROFILE ERROR:", cropResult.error);
+    if (soilResult.error) console.error("ANALYSIS SOIL PROFILE ERROR:", soilResult.error);
+
+    const cropProfile = (cropResult.data ?? null) as CropProfile | null;
+    let cropStageProfile: CropStageProfile | null = null;
+
+    if (cropProfile && growthStage) {
+      const { data: stageData, error: stageError } = await serviceSupabase
+        .from("crop_stage_profiles")
+        .select("*")
+        .eq("crop_profile_id", cropProfile.id)
+        .eq("growth_stage", growthStage)
+        .maybeSingle();
+      if (stageError) console.error("ANALYSIS CROP STAGE ERROR:", stageError);
+      cropStageProfile = (stageData ?? null) as CropStageProfile | null;
+    }
+
+    let weather = null;
+    try {
+      weather = await fetchProjectWeather(latitude, longitude);
+    } catch (weatherError) {
+      console.error("ANALYSIS WEATHER ERROR:", weatherError);
+    }
+
+    const engineHistory: NdviHistory[] = history.map((item, index) => ({
+      id: index,
+      project_id: projectId,
+      period_from: item.from,
+      period_to: item.to,
+      ndvi: item.ndvi,
+      created_at: analysisCreatedAt,
+    }));
+
+    const recommendation = evaluateProjectContext(
+      currentNdvi,
+      cropProfile,
+      cropStageProfile,
+      growthStage,
+      weather,
+      engineHistory,
+      analysisCreatedAt,
+      (soilResult.data ?? null) as ProjectSoilProfile | null
+    );
+
+    const authoritativeRisk =
+      recommendation.priority === "Kritická" ? "Kritické" :
+      recommendation.priority === "Vysoká" ? "Vysoké" :
+      recommendation.priority === "Střední" ? "Střední" : "Nízké";
+
+    const { data: savedAnalysis, error: analysisInsertError } = await serviceSupabase
+      .from("analysis")
+      .insert({
+        project_id: projectId,
+        ndvi: currentNdvi,
+        vegetation: Math.round(currentNdvi * 100),
+        risk: authoritativeRisk,
+        period_from: latest.from,
+        period_to: latest.to,
+        source_provider: "Copernicus Data Space Ecosystem",
+        satellite: "Sentinel-2",
+        satellite_product: "Sentinel-2 L2A",
+        spatial_resolution_m: 10,
+        analysis_crs: `EPSG:${analysisEpsg}`,
+        analysis_utm_zone: analysisUtmZone,
+        geometry_pixel_count: geometryPixelCount,
+        valid_pixel_count: latest.validPixelCount,
+        valid_geometry_pct: latest.validGeometryPct,
+        accepted_intervals: history.length,
+        rejected_intervals: rejectedIntervals.length,
+        quality_gate_pct: MIN_VALID_GEOMETRY_PCT,
+        median_ndvi: latest.medianNdvi,
+        p05_ndvi: latest.p05Ndvi,
+        p95_ndvi: latest.p95Ndvi,
+      })
+      .select()
+      .single();
+
+    if (analysisInsertError || !savedAnalysis) {
+      console.error("ANALYSIS PERSISTENCE ERROR:", analysisInsertError);
+      return NextResponse.json({ error: "Analýzu se nepodařilo bezpečně uložit." }, { status: 500 });
+    }
+
+    const { data: savedRecommendation, error: recommendationError } = await serviceSupabase
+      .from("aegris_recommendations")
+      .upsert({
+        project_id: projectId,
+        analysis_id: savedAnalysis.id,
+        crop_name: cropName || null,
+        growth_stage: growthStage || null,
+        ndvi: currentNdvi,
+        level: recommendation.level,
+        priority: recommendation.priority,
+        score: recommendation.score,
+        summary: recommendation.summary,
+        recommendation: recommendation.recommendation,
+        actions: recommendation.actions,
+        weather_snapshot: weather,
+      }, { onConflict: "analysis_id" })
+      .select()
+      .single();
+
+    if (recommendationError || !savedRecommendation) {
+      console.error("RECOMMENDATION PERSISTENCE ERROR:", recommendationError);
+      return NextResponse.json({ error: "Výsledek AEGRIS se nepodařilo bezpečně uložit." }, { status: 500 });
+    }
+
+    const alertLevel = recommendation.level === "Kritické" ? "critical" : recommendation.level === "Upozornění" ? "warning" : "info";
+    const alertTitle = recommendation.level === "Kritické" ? "Kritický stav projektu" : recommendation.level === "Upozornění" ? "AEGRIS upozornění" : "AEGRIS informační stav";
+    const alertMessage = `${recommendation.summary} ${recommendation.recommendation}`.trim();
+
+    const { error: staleAlertError } = await serviceSupabase
+      .from("aegris_alerts")
+      .update({ is_read: true })
+      .eq("project_id", projectId)
+      .neq("level", alertLevel)
+      .or("is_read.eq.false,is_read.is.null");
+    if (staleAlertError) console.error("STALE ALERT CLEANUP ERROR:", staleAlertError);
+
+    const { data: existingAlerts, error: existingAlertError } = await serviceSupabase
+      .from("aegris_alerts")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("level", alertLevel)
+      .eq("title", alertTitle)
+      .or("is_read.eq.false,is_read.is.null")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (existingAlertError) console.error("ALERT LOOKUP ERROR:", existingAlertError);
+
+    const existingAlert = existingAlerts?.[0] ?? null;
+    const duplicateIds = (existingAlerts ?? []).slice(1).map((item) => item.id);
+
+    if (existingAlert?.id) {
+      const { error: alertUpdateError } = await serviceSupabase.from("aegris_alerts").update({
+        analysis_id: savedAnalysis.id,
+        recommendation_id: savedRecommendation.id,
+        priority: recommendation.priority,
+        message: alertMessage,
+        is_read: false,
+      }).eq("id", existingAlert.id);
+      if (alertUpdateError) console.error("ALERT UPDATE ERROR:", alertUpdateError);
+      if (duplicateIds.length) {
+        const { error: duplicateError } = await serviceSupabase.from("aegris_alerts").update({ is_read: true }).in("id", duplicateIds);
+        if (duplicateError) console.error("ALERT DUPLICATE CLEANUP ERROR:", duplicateError);
+      }
+    } else {
+      const { error: alertInsertError } = await serviceSupabase.from("aegris_alerts").insert({
+        project_id: projectId,
+        analysis_id: savedAnalysis.id,
+        recommendation_id: savedRecommendation.id,
+        level: alertLevel,
+        priority: recommendation.priority,
+        title: alertTitle,
+        message: alertMessage,
+        is_read: false,
+      });
+      if (alertInsertError) console.error("ALERT INSERT ERROR:", alertInsertError);
+    }
+
     return NextResponse.json({
       projectId,
+      analysis: savedAnalysis,
+      aegrisRecommendation: savedRecommendation,
+      decision: recommendation,
+      weather,
       latitude,
       longitude,
       hasBoundary: true,

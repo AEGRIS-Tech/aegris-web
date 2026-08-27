@@ -597,395 +597,25 @@ setAreaError("");
   }
 
   async function runAnalysis() {
-    if (!project || runningAnalysis || analysisRunRef.current) {
-      return;
-    }
+    if (!project || runningAnalysis || analysisRunRef.current) return;
 
     analysisRunRef.current = true;
     setRunningAnalysis(true);
 
     try {
-      const response = await fetch(
-      `/api/analysis?projectId=${project.id}`
-     );
-
+      const response = await fetch(`/api/analysis?projectId=${project.id}`, { method: "POST" });
       const result = await response.json();
 
       if (!response.ok) {
-        console.error(
-          "CHYBA API ANALÝZY:",
-          result
-        );
+        console.error("CHYBA API ANALÝZY:", result);
         return;
       }
 
-      const ndvi = Number(result.ndvi);
-
-const freshNdviHistory: NdviHistory[] =
-        Array.isArray(result.history)
-          ? result.history
-              .map((item: unknown) => {
-                if (
-                  item === null ||
-                  typeof item !== "object"
-                ) {
-                  return null;
-                }
-
-                const candidate =
-                  item as Record<string, unknown>;
-
-                const periodFrom =
-                  typeof candidate.from === "string"
-                    ? candidate.from
-                    : null;
-
-                const periodTo =
-                  typeof candidate.to === "string"
-                    ? candidate.to
-                    : null;
-
-                const historyNdvi = Number(
-                  candidate.ndvi
-                );
-
-                if (
-                  !periodFrom ||
-                  !periodTo ||
-                  !Number.isFinite(historyNdvi)
-                ) {
-                  return null;
-                }
-
-                return {
-                  id: 0,
-                  project_id: project.id,
-                  period_from: periodFrom,
-                  period_to: periodTo,
-                  ndvi: historyNdvi,
-                  created_at:
-                    new Date().toISOString(),
-                };
-              })
-              .filter(
-                (item: NdviHistory | null): item is NdviHistory =>
-                  item !== null
-              )
-          : [];
-
-      const effectiveNdviHistory =
-        freshNdviHistory.length > 0
-          ? freshNdviHistory
-          : ndviHistory;
-
-      setNdviHistory(effectiveNdviHistory);
-
-      if (!Number.isFinite(ndvi)) {
-        console.error(
-          "API VRÁTILO NEPLATNÉ NDVI:",
-          result.ndvi
-        );
-        return;
-      }
-
-      const vegetation = Math.round(ndvi * 100);
-
-      // ---------------------------------------------------------
-      // AEGRIS DECISION ENGINE = jediný zdroj pravdy pro risk
-      // ---------------------------------------------------------
-      const analysisCreatedAt = new Date().toISOString();
-
-      const recommendation = evaluateProjectContext(
-        ndvi,
-        selectedCropProfile,
-        selectedCropStageProfile,
-        growthStage,
-        weather,
-        effectiveNdviHistory,
-        analysisCreatedAt,
-        soilProfile
-      );
-
-      // DB tabulka analysis používá starší pole "risk".
-      // Hodnotu ale už neurčujeme pouze podle NDVI.
-      // Převádíme kanonickou AEGRIS prioritu do staršího formátu.
-      const risk =
-        recommendation.priority === "Kritická"
-          ? "Kritické"
-          : recommendation.priority === "Vysoká"
-            ? "Vysoké"
-            : recommendation.priority === "Střední"
-              ? "Střední"
-              : "Nízké";
-
-const {
-  data,
-  error,
-} = await supabase
-  .from("analysis")
-  .insert({
-    project_id: project.id,
-    ndvi,
-    vegetation,
-    risk,
-    period_from:
-      Array.isArray(result.history) && result.history.length > 0
-        ? result.history[result.history.length - 1].from
-        : null,
-    period_to:
-      Array.isArray(result.history) && result.history.length > 0
-        ? result.history[result.history.length - 1].to
-        : null,
-
-    // Zdroj dat - hodnoty pochází přímo z /api/analysis.
-    source_provider:
-      typeof result.source?.provider === "string"
-        ? result.source.provider
-        : null,
-    satellite:
-      typeof result.source?.satellite === "string"
-        ? result.source.satellite
-        : null,
-    satellite_product:
-      typeof result.source?.product === "string"
-        ? result.source.product
-        : null,
-    spatial_resolution_m:
-      Number.isFinite(Number(result.source?.spatialResolutionMeters))
-        ? Number(result.source.spatialResolutionMeters)
-        : null,
-    analysis_crs:
-      typeof result.source?.analysisCrs === "string"
-        ? result.source.analysisCrs
-        : null,
-    analysis_utm_zone:
-      Number.isFinite(Number(result.source?.analysisUtmZone))
-        ? Number(result.source.analysisUtmZone)
-        : null,
-
-    // Kvalita dat - rovněž přímo z odpovědi Sentinel/Copernicus analýzy.
-    geometry_pixel_count:
-      Number.isFinite(Number(result.quality?.geometryPixelCount))
-        ? Number(result.quality.geometryPixelCount)
-        : null,
-    valid_pixel_count:
-      Number.isFinite(Number(result.quality?.latestValidPixelCount))
-        ? Number(result.quality.latestValidPixelCount)
-        : null,
-    valid_geometry_pct:
-      Number.isFinite(Number(result.quality?.latestValidGeometryPct))
-        ? Number(result.quality.latestValidGeometryPct)
-        : null,
-    accepted_intervals:
-      Number.isFinite(Number(result.quality?.acceptedIntervals))
-        ? Number(result.quality.acceptedIntervals)
-        : null,
-    rejected_intervals:
-      Number.isFinite(Number(result.quality?.rejectedIntervals))
-        ? Number(result.quality.rejectedIntervals)
-        : null,
-    quality_gate_pct:
-      Number.isFinite(Number(result.quality?.minValidGeometryPct))
-        ? Number(result.quality.minValidGeometryPct)
-        : null,
-
-    // Distribuce NDVI posledního přijatého intervalu.
-    median_ndvi:
-      Number.isFinite(Number(result.medianNdvi))
-        ? Number(result.medianNdvi)
-        : null,
-    p05_ndvi:
-      Number.isFinite(Number(result.p05Ndvi))
-        ? Number(result.p05Ndvi)
-        : null,
-    p95_ndvi:
-      Number.isFinite(Number(result.p95Ndvi))
-        ? Number(result.p95Ndvi)
-        : null,
-  })
-  .select()
-  .single();
-
-      if (error) {
-        console.error(
-          "CHYBA INSERTU ANALÝZY:",
-          error
-        );
-        return;
-      }
-
-      setAnalysis(data);
-
-      const {
-        data: recommendationData,
-        error: recommendationInsertError,
-      } = await supabase
-        .from("aegris_recommendations")
-        .upsert(
-          {
-            project_id: project.id,
-            analysis_id: data.id,
-            crop_name: cropName || null,
-            growth_stage: growthStage || null,
-            ndvi,
-            level: recommendation.level,
-            priority: recommendation.priority,
-            score: recommendation.score,
-            summary: recommendation.summary,
-            recommendation: recommendation.recommendation,
-            actions: recommendation.actions,
-            weather_snapshot: weather,
-          },
-          { onConflict: "analysis_id" }
-        )
-        .select()
-        .single();
-
-      if (recommendationInsertError) {
-        console.error(
-          "CHYBA ULOŽENÍ HISTORIE AEGRIS:",
-          recommendationInsertError
-        );
-      } else if (recommendationData) {
-        const savedRecommendation =
-          recommendationData as AegrisRecommendation;
-
-        setRecommendationHistory((current) => [
-          savedRecommendation,
-          ...current.filter(
-            (item) => item.analysis_id !== savedRecommendation.analysis_id
-          ),
-        ]);
-      }
-
-      // ---------------------------------------------------------
-      // AEGRIS ALERT
-      // Kritický / varovný / informační stav se pro projekt drží
-      // jako jeden aktivní (nepřečtený) alert stejného typu.
-      // Opakované spuštění analýzy tedy nevytváří kopie.
-      //
-      // NULL v is_read bereme stejně jako false, protože starší
-      // databázové záznamy mohou mít tento sloupec nevyplněný.
-      // ---------------------------------------------------------
-
-      const alertLevel: AegrisAlert["level"] =
-        recommendation.level === "Kritické"
-          ? "critical"
-          : recommendation.level === "Upozornění"
-            ? "warning"
-            : "info";
-
-      const alertTitle =
-        recommendation.level === "Kritické"
-          ? "Kritický stav projektu"
-          : recommendation.level === "Upozornění"
-            ? "AEGRIS upozornění"
-            : "AEGRIS informační stav";
-
-      const alertMessage =
-        `${recommendation.summary} ${recommendation.recommendation}`.trim();
-
-      // Po změně stavu nesmí zůstat starý nepřečtený alert
-      // jiné úrovně. Jinak by dashboard mohl zobrazovat staré
-      // "Kritické" upozornění i po novém vyhodnocení.
-      const { error: staleAlertError } = await supabase
-        .from("aegris_alerts")
-        .update({ is_read: true })
-        .eq("project_id", project.id)
-        .neq("level", alertLevel)
-        .or("is_read.eq.false,is_read.is.null");
-
-      if (staleAlertError) {
-        console.error(
-          "CHYBA ČIŠTĚNÍ STARÝCH ALERTŮ AEGRIS:",
-          staleAlertError
-        );
-      }
-
-      const {
-        data: existingAlerts,
-        error: existingAlertError,
-      } = await supabase
-        .from("aegris_alerts")
-        .select("id")
-        .eq("project_id", project.id)
-        .eq("level", alertLevel)
-        .eq("title", alertTitle)
-        .or("is_read.eq.false,is_read.is.null")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (existingAlertError) {
-        console.error(
-          "CHYBA KONTROLY DUPLICITNÍHO ALERTU AEGRIS:",
-          existingAlertError
-        );
-      }
-
-      const existingAlert = existingAlerts?.[0] ?? null;
-      const duplicateAlertIds = (existingAlerts ?? [])
-        .slice(1)
-        .map((alert) => alert.id);
-
-      if (existingAlert?.id) {
-        const { error: alertUpdateError } = await supabase
-          .from("aegris_alerts")
-          .update({
-            analysis_id: data.id,
-            recommendation_id: recommendationData?.id ?? null,
-            priority: recommendation.priority,
-            message: alertMessage,
-            is_read: false,
-          })
-          .eq("id", existingAlert.id);
-
-        if (alertUpdateError) {
-          console.error(
-            "CHYBA AKTUALIZACE EXISTUJÍCÍHO ALERTU AEGRIS:",
-            alertUpdateError
-          );
-        }
-
-        if (duplicateAlertIds.length > 0) {
-          const { error: duplicateUpdateError } = await supabase
-            .from("aegris_alerts")
-            .update({ is_read: true })
-            .in("id", duplicateAlertIds);
-
-          if (duplicateUpdateError) {
-            console.error(
-              "CHYBA ČIŠTĚNÍ DUPLICITNÍCH ALERTŮ AEGRIS:",
-              duplicateUpdateError
-            );
-          }
-        }
-      } else {
-        const { error: alertInsertError } = await supabase
-          .from("aegris_alerts")
-          .insert({
-            project_id: project.id,
-            analysis_id: data.id,
-            recommendation_id: recommendationData?.id ?? null,
-            level: alertLevel,
-            priority: recommendation.priority,
-            title: alertTitle,
-            message: alertMessage,
-            is_read: false,
-          });
-
-        if (alertInsertError) {
-          console.error(
-            "CHYBA ULOŽENÍ ALERTU AEGRIS:",
-            alertInsertError
-          );
-        }
-      }
-
+      // Autoritativní výpočet i persistence probíhají na serveru.
+      // Klient po úspěchu pouze znovu načte stav projektu.
+      await loadProject();
     } catch (error) {
-      console.error(
-        "CHYBA ANALÝZY:",
-        error
-      );
+      console.error("CHYBA ANALÝZY:", error);
     } finally {
       analysisRunRef.current = false;
       setRunningAnalysis(false);
@@ -993,10 +623,9 @@ const {
   }
 
   async function markAlertAsRead(alertId: number) {
-    const { error } = await supabase
-      .from("aegris_alerts")
-      .update({ is_read: true })
-      .eq("id", alertId);
+    const { error } = await supabase.rpc("mark_aegris_alert_read", {
+      p_alert_id: alertId,
+    });
 
     if (error) {
       console.error("CHYBA OZNAČENÍ ALERTU:", error);
@@ -1005,9 +634,7 @@ const {
 
     setAlerts((current) =>
       current.map((alert) =>
-        alert.id === alertId
-          ? { ...alert, is_read: true }
-          : alert
+        alert.id === alertId ? { ...alert, is_read: true } : alert
       )
     );
   }
