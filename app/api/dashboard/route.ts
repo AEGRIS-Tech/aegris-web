@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +49,8 @@ export async function GET() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const publishableKey =
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    const serviceRoleKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !publishableKey || !serviceRoleKey) {
+    if (!supabaseUrl || !publishableKey) {
       return NextResponse.json(
         {
           error:
@@ -100,21 +97,10 @@ export async function GET() {
       );
     }
 
-    const serviceSupabase = createClient(
-      supabaseUrl,
-      serviceRoleKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-      }
-    );
-
     const {
       data: projectsData,
       error: projectsError,
-    } = await serviceSupabase
+    } = await authSupabase
       .from("projects")
       .select(
         "id, name, latitude, longitude, status, created_at"
@@ -160,7 +146,7 @@ export async function GET() {
       recommendationsResult,
       alertsResult,
     ] = await Promise.all([
-      serviceSupabase
+      authSupabase
         .from("analysis")
         .select(
           "id, project_id, ndvi, risk, created_at, valid_geometry_pct, source_provider, satellite_product"
@@ -168,7 +154,7 @@ export async function GET() {
         .in("project_id", projectIds)
         .order("created_at", { ascending: false }),
 
-      serviceSupabase
+      authSupabase
         .from("aegris_recommendations")
         .select(
           "id, project_id, analysis_id, priority, score, created_at"
@@ -176,7 +162,7 @@ export async function GET() {
         .in("project_id", projectIds)
         .order("created_at", { ascending: false }),
 
-      serviceSupabase
+      authSupabase
         .from("aegris_alerts")
         .select(
           "id, project_id, analysis_id, level, priority, title, is_read, created_at"
