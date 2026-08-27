@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { requireAccountAccess } from "@/lib/auth/account-access";
 
 export const dynamic = "force-dynamic";
 
@@ -85,17 +86,20 @@ export async function GET() {
       }
     );
 
-    const {
-      data: { user },
-      error: userError,
-    } = await authSupabase.auth.getUser();
+    const access =
+      await requireAccountAccess(authSupabase);
 
-    if (userError || !user) {
+    if (!access.ok) {
       return NextResponse.json(
-        { error: "Uživatel není přihlášen." },
-        { status: 401 }
+        {
+          error: access.message,
+          code: access.code,
+        },
+        { status: access.status }
       );
     }
+
+    const { user } = access;
 
     const {
       data: projectsData,
@@ -238,7 +242,10 @@ export async function GET() {
       new Map<number, number>();
 
     for (const alert of alerts) {
-      if (alert.is_read === false || alert.is_read === null) {
+      if (
+        alert.is_read === false ||
+        alert.is_read === null
+      ) {
         unreadAlertsByProject.set(
           alert.project_id,
           (unreadAlertsByProject.get(
@@ -272,6 +279,7 @@ export async function GET() {
 
         return {
           ...project,
+
           latestAnalysis:
             latestAnalysis != null
               ? {
@@ -369,11 +377,13 @@ export async function GET() {
           latestAnalysisByProject.size,
 
         alerts: alerts.length,
+
         unreadAlerts: alerts.filter(
           (alert) =>
             alert.is_read === false ||
             alert.is_read === null
         ).length,
+
         criticalProjects:
           criticalProjectIds.size,
       },
@@ -390,14 +400,20 @@ export async function GET() {
                       name: latestProject.name,
                     }
                   : null,
+
               analysis: {
                 id: latestAnalysis.id,
+
                 ndvi: Number(
                   latestAnalysis.ndvi
                 ),
-                risk: latestAnalysis.risk,
+
+                risk:
+                  latestAnalysis.risk,
+
                 created_at:
                   latestAnalysis.created_at,
+
                 valid_geometry_pct:
                   latestAnalysis.valid_geometry_pct !=
                   null
@@ -405,11 +421,14 @@ export async function GET() {
                         latestAnalysis.valid_geometry_pct
                       )
                     : null,
+
                 source_provider:
                   latestAnalysis.source_provider,
+
                 satellite_product:
                   latestAnalysis.satellite_product,
               },
+
               recommendation:
                 latestRecommendation != null
                   ? {
