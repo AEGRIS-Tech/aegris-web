@@ -1,106 +1,211 @@
-import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export const dynamic = "force-dynamic";
 
 function numberOrNull(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
     return null;
   }
 
   const number = Number(value);
 
-  return Number.isFinite(number) ? number : null;
+  return Number.isFinite(number)
+    ? number
+    : null;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest
+) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabasePublishableKey =
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-    if (!supabaseUrl || !supabasePublishableKey) {
+    const supabasePublishableKey =
+      process.env
+        .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+    if (
+      !supabaseUrl ||
+      !supabasePublishableKey
+    ) {
       return NextResponse.json(
-        { error: "Server nemá kompletní Supabase konfiguraci." },
-        { status: 500 }
+        {
+          error:
+            "Server nemá kompletní Supabase konfiguraci.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const cookieStore = await cookies();
+    const cookieStore =
+      await cookies();
 
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabasePublishableKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
+    const supabase =
+      createServerClient(
+        supabaseUrl,
+        supabasePublishableKey,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
+
+            setAll(cookiesToSet) {
+              try {
+                cookiesToSet.forEach(
+                  ({
+                    name,
+                    value,
+                    options,
+                  }) => {
+                    cookieStore.set(
+                      name,
+                      value,
+                      options
+                    );
+                  }
+                );
+              } catch {
+                /*
+                 * Refresh cookies není pro tento
+                 * read-only endpoint kritický.
+                 */
+              }
+            },
           },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) => {
-                cookieStore.set(name, value, options);
-              });
-            } catch {
-              // Refresh cookies není pro tento read-only endpoint kritický.
-            }
-          },
-        },
-      }
-    );
+        }
+      );
+
+    /*
+     * =====================================================
+     * AUTH
+     * =====================================================
+     */
 
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
+    } =
+      await supabase.auth.getUser();
 
-    if (userError || !user) {
+    if (
+      userError ||
+      !user
+    ) {
       return NextResponse.json(
-        { error: "Uživatel není přihlášen." },
-        { status: 401 }
+        {
+          error:
+            "Uživatel není přihlášen.",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const projectId = Number(
-      request.nextUrl.searchParams.get("projectId")
-    );
+    /*
+     * =====================================================
+     * PROJECT ID
+     * =====================================================
+     */
 
-    if (!Number.isInteger(projectId) || projectId <= 0) {
+    const projectId =
+      Number(
+        request.nextUrl.searchParams.get(
+          "projectId"
+        )
+      );
+
+    if (
+      !Number.isInteger(projectId) ||
+      projectId <= 0
+    ) {
       return NextResponse.json(
-        { error: "Chybí platné projectId." },
-        { status: 400 }
+        {
+          error:
+            "Chybí platné projectId.",
+        },
+        {
+          status: 400,
+        }
       );
     }
+
+    /*
+     * =====================================================
+     * PROJECT OWNERSHIP
+     * =====================================================
+     *
+     * Souřadnice nikdy nepřebíráme přímo od klienta.
+     * Nejprve ověříme, že projekt patří přihlášenému
+     * uživateli, a teprve potom použijeme jeho souřadnice.
+     */
 
     const {
       data: project,
       error: projectError,
     } = await supabase
       .from("projects")
-      .select("id, latitude, longitude")
+      .select(
+        "id, latitude, longitude"
+      )
       .eq("id", projectId)
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (projectError) {
-      console.error("WEATHER PROJECT ERROR:", projectError);
+      console.error(
+        "WEATHER PROJECT ERROR:",
+        projectError
+      );
 
       return NextResponse.json(
-        { error: "Nepodařilo se ověřit projekt." },
-        { status: 500 }
+        {
+          error:
+            "Nepodařilo se ověřit projekt.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     if (!project) {
       return NextResponse.json(
-        { error: "Projekt nebyl nalezen nebo k němu nemáte přístup." },
-        { status: 404 }
+        {
+          error:
+            "Projekt nebyl nalezen nebo k němu nemáte přístup.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
-    const latitude = numberOrNull(project.latitude);
-    const longitude = numberOrNull(project.longitude);
+    /*
+     * =====================================================
+     * COORDINATES
+     * =====================================================
+     */
+
+    const latitude =
+      numberOrNull(
+        project.latitude
+      );
+
+    const longitude =
+      numberOrNull(
+        project.longitude
+      );
 
     if (
       latitude === null ||
@@ -111,15 +216,40 @@ export async function GET(request: NextRequest) {
       longitude > 180
     ) {
       return NextResponse.json(
-        { error: "Projekt nemá platné souřadnice." },
-        { status: 422 }
+        {
+          error:
+            "Projekt nemá platné souřadnice.",
+        },
+        {
+          status: 422,
+        }
       );
     }
 
-    const url = new URL("https://api.open-meteo.com/v1/forecast");
+    /*
+     * =====================================================
+     * OPEN-METEO REQUEST
+     * =====================================================
+     *
+     * Host i cesta jsou pevně dané.
+     * Klient nemůže ovlivnit cílový server.
+     */
 
-    url.searchParams.set("latitude", String(latitude));
-    url.searchParams.set("longitude", String(longitude));
+    const url =
+      new URL(
+        "https://api.open-meteo.com/v1/forecast"
+      );
+
+    url.searchParams.set(
+      "latitude",
+      String(latitude)
+    );
+
+    url.searchParams.set(
+      "longitude",
+      String(longitude)
+    );
+
     url.searchParams.set(
       "current",
       [
@@ -130,6 +260,7 @@ export async function GET(request: NextRequest) {
         "soil_moisture_9_to_27cm",
       ].join(",")
     );
+
     url.searchParams.set(
       "hourly",
       [
@@ -139,6 +270,7 @@ export async function GET(request: NextRequest) {
         "soil_moisture_9_to_27cm",
       ].join(",")
     );
+
     url.searchParams.set(
       "daily",
       [
@@ -148,152 +280,370 @@ export async function GET(request: NextRequest) {
         "temperature_2m_max",
       ].join(",")
     );
-    url.searchParams.set("forecast_days", "2");
-    url.searchParams.set("timezone", "auto");
-    url.searchParams.set("temperature_unit", "celsius");
-    url.searchParams.set("wind_speed_unit", "kmh");
-    url.searchParams.set("precipitation_unit", "mm");
 
-    const response = await fetch(url.toString(), {
-      next: { revalidate: 900 },
-    });
+    url.searchParams.set(
+      "forecast_days",
+      "2"
+    );
+
+    url.searchParams.set(
+      "timezone",
+      "auto"
+    );
+
+    url.searchParams.set(
+      "temperature_unit",
+      "celsius"
+    );
+
+    url.searchParams.set(
+      "wind_speed_unit",
+      "kmh"
+    );
+
+    url.searchParams.set(
+      "precipitation_unit",
+      "mm"
+    );
+
+    /*
+     * Explicitní timeout chrání server před příliš
+     * dlouhým čekáním při výpadku nebo zpomalení
+     * externího weather provideru.
+     */
+
+    const response =
+      await fetch(
+        url.toString(),
+        {
+          next: {
+            revalidate: 900,
+          },
+          signal:
+            AbortSignal.timeout(
+              10_000
+            ),
+        }
+      );
 
     if (!response.ok) {
-      const text = await response.text();
-      console.error("OPEN-METEO ERROR:", text);
+      const text =
+        await response.text();
+
+      console.error(
+        "OPEN-METEO ERROR:",
+        text
+      );
 
       return NextResponse.json(
-        { error: "Počasí se nepodařilo načíst." },
-        { status: 502 }
+        {
+          error:
+            "Počasí se nepodařilo načíst.",
+        },
+        {
+          status: 502,
+        }
       );
     }
 
-    const data = await response.json();
+    /*
+     * =====================================================
+     * RESPONSE NORMALIZATION
+     * =====================================================
+     */
 
-    const current = data.current ?? {};
-    const hourly = data.hourly ?? {};
-    const daily = data.daily ?? {};
+    const data =
+      await response.json();
 
-    const hourlyTimes: string[] = Array.isArray(hourly.time)
-      ? hourly.time
-      : [];
+    const current =
+      data.current ?? {};
 
-    const hourlyPrecipitation: unknown[] = Array.isArray(
-      hourly.precipitation
-    )
-      ? hourly.precipitation
-      : [];
+    const hourly =
+      data.hourly ?? {};
 
-    const hourlyTemperature: unknown[] = Array.isArray(
-      hourly.temperature_2m
-    )
-      ? hourly.temperature_2m
-      : [];
+    const daily =
+      data.daily ?? {};
 
-    const hourlyPrecipitationProbability: unknown[] = Array.isArray(
-      hourly.precipitation_probability
-    )
-      ? hourly.precipitation_probability
-      : [];
+    const hourlyTimes: string[] =
+      Array.isArray(
+        hourly.time
+      )
+        ? hourly.time
+        : [];
 
-    const currentTime = String(current.time ?? "");
+    const hourlyPrecipitation:
+      unknown[] =
+      Array.isArray(
+        hourly.precipitation
+      )
+        ? hourly.precipitation
+        : [];
 
-    let currentIndex = hourlyTimes.findIndex(
-      (time) => time === currentTime
-    );
+    const hourlyTemperature:
+      unknown[] =
+      Array.isArray(
+        hourly.temperature_2m
+      )
+        ? hourly.temperature_2m
+        : [];
+
+    const hourlyPrecipitationProbability:
+      unknown[] =
+      Array.isArray(
+        hourly.precipitation_probability
+      )
+        ? hourly.precipitation_probability
+        : [];
+
+    const currentTime =
+      String(
+        current.time ?? ""
+      );
+
+    let currentIndex =
+      hourlyTimes.findIndex(
+        (time) =>
+          time === currentTime
+      );
 
     if (currentIndex < 0) {
       currentIndex = 0;
     }
 
-    const next24hPrecipitation = hourlyPrecipitation
-      .slice(currentIndex, currentIndex + 24)
-      .map(numberOrNull)
-      .filter((value): value is number => value !== null)
-      .reduce((sum, value) => sum + value, 0);
+    /*
+     * =====================================================
+     * NEXT 24 HOURS
+     * =====================================================
+     */
 
-    const next24hTemperatures = hourlyTemperature
-      .slice(currentIndex, currentIndex + 24)
-      .map(numberOrNull)
-      .filter((value): value is number => value !== null);
+    const next24hPrecipitation =
+      hourlyPrecipitation
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
+        .map(numberOrNull)
+        .filter(
+          (
+            value
+          ): value is number =>
+            value !== null
+        )
+        .reduce(
+          (sum, value) =>
+            sum + value,
+          0
+        );
+
+    const next24hTemperatures =
+      hourlyTemperature
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
+        .map(numberOrNull)
+        .filter(
+          (
+            value
+          ): value is number =>
+            value !== null
+        );
 
     const next24hPrecipitationProbability =
       hourlyPrecipitationProbability
-        .slice(currentIndex, currentIndex + 24)
+        .slice(
+          currentIndex,
+          currentIndex + 24
+        )
         .map(numberOrNull)
-        .filter((value): value is number => value !== null);
+        .filter(
+          (
+            value
+          ): value is number =>
+            value !== null
+        );
 
     const next24hMinTemperature =
-      next24hTemperatures.length > 0
-        ? Math.min(...next24hTemperatures)
+      next24hTemperatures.length >
+      0
+        ? Math.min(
+            ...next24hTemperatures
+          )
         : null;
 
     const next24hMaxTemperature =
-      next24hTemperatures.length > 0
-        ? Math.max(...next24hTemperatures)
+      next24hTemperatures.length >
+      0
+        ? Math.max(
+            ...next24hTemperatures
+          )
         : null;
 
     const maxPrecipitationProbability =
-      next24hPrecipitationProbability.length > 0
-        ? Math.max(...next24hPrecipitationProbability)
+      next24hPrecipitationProbability
+        .length > 0
+        ? Math.max(
+            ...next24hPrecipitationProbability
+          )
         : null;
 
-    const dailyMin: unknown[] = Array.isArray(daily.temperature_2m_min)
-      ? daily.temperature_2m_min
-      : [];
+    /*
+     * =====================================================
+     * DAILY DATA
+     * =====================================================
+     */
 
-    const dailyMax: unknown[] = Array.isArray(daily.temperature_2m_max)
-      ? daily.temperature_2m_max
-      : [];
+    const dailyMin:
+      unknown[] =
+      Array.isArray(
+        daily.temperature_2m_min
+      )
+        ? daily.temperature_2m_min
+        : [];
 
-    const dailyEvapotranspiration: unknown[] = Array.isArray(
-      daily.et0_fao_evapotranspiration
-    )
-      ? daily.et0_fao_evapotranspiration
-      : [];
+    const dailyMax:
+      unknown[] =
+      Array.isArray(
+        daily.temperature_2m_max
+      )
+        ? daily.temperature_2m_max
+        : [];
 
-    const temperature = numberOrNull(current.temperature_2m);
-    const humidity = numberOrNull(current.relative_humidity_2m);
-    const precipitation = numberOrNull(current.precipitation);
-    const wind = numberOrNull(current.wind_speed_10m);
+    const dailyEvapotranspiration:
+      unknown[] =
+      Array.isArray(
+        daily.et0_fao_evapotranspiration
+      )
+        ? daily.et0_fao_evapotranspiration
+        : [];
 
-    const soilMoistureRaw = numberOrNull(
-      current.soil_moisture_9_to_27cm
-    );
+    /*
+     * =====================================================
+     * CURRENT WEATHER
+     * =====================================================
+     */
+
+    const temperature =
+      numberOrNull(
+        current.temperature_2m
+      );
+
+    const humidity =
+      numberOrNull(
+        current.relative_humidity_2m
+      );
+
+    const precipitation =
+      numberOrNull(
+        current.precipitation
+      );
+
+    const wind =
+      numberOrNull(
+        current.wind_speed_10m
+      );
+
+    const soilMoistureRaw =
+      numberOrNull(
+        current
+          .soil_moisture_9_to_27cm
+      );
 
     const soilMoisture =
-      soilMoistureRaw !== null ? soilMoistureRaw * 100 : null;
+      soilMoistureRaw !== null
+        ? soilMoistureRaw * 100
+        : null;
+
+    /*
+     * =====================================================
+     * PUBLIC RESPONSE
+     * =====================================================
+     *
+     * Klient dostává pouze normalizovaná data potřebná
+     * pro AEGRIS, nikoli syrový payload providera.
+     */
 
     return NextResponse.json({
       projectId,
-      latitude: numberOrNull(data.latitude) ?? latitude,
-      longitude: numberOrNull(data.longitude) ?? longitude,
-      timezone: String(data.timezone ?? ""),
-      fetched_at: String(
-        current.time ?? new Date().toISOString()
-      ),
-      temperature_c: temperature,
-      humidity_pct: humidity,
-      precipitation_mm: precipitation,
-      wind_speed_kmh: wind,
-      soil_moisture_pct: soilMoisture,
-      evapotranspiration_mm: numberOrNull(
-        dailyEvapotranspiration[0]
-      ),
+
+      latitude:
+        numberOrNull(
+          data.latitude
+        ) ?? latitude,
+
+      longitude:
+        numberOrNull(
+          data.longitude
+        ) ?? longitude,
+
+      timezone:
+        String(
+          data.timezone ?? ""
+        ),
+
+      fetched_at:
+        String(
+          current.time ??
+            new Date().toISOString()
+        ),
+
+      temperature_c:
+        temperature,
+
+      humidity_pct:
+        humidity,
+
+      precipitation_mm:
+        precipitation,
+
+      wind_speed_kmh:
+        wind,
+
+      soil_moisture_pct:
+        soilMoisture,
+
+      evapotranspiration_mm:
+        numberOrNull(
+          dailyEvapotranspiration[0]
+        ),
+
       precipitation_probability_pct:
         maxPrecipitationProbability,
-      next24h_precipitation_mm: next24hPrecipitation,
+
+      next24h_precipitation_mm:
+        next24hPrecipitation,
+
       next24h_min_temperature_c:
-        next24hMinTemperature ?? numberOrNull(dailyMin[0]),
+        next24hMinTemperature ??
+        numberOrNull(
+          dailyMin[0]
+        ),
+
       next24h_max_temperature_c:
-        next24hMaxTemperature ?? numberOrNull(dailyMax[0]),
+        next24hMaxTemperature ??
+        numberOrNull(
+          dailyMax[0]
+        ),
     });
   } catch (error) {
-    console.error("WEATHER ROUTE ERROR:", error);
+    /*
+     * AbortSignal.timeout() při timeoutu skončí také zde.
+     * Detail chyby zůstává pouze na serveru.
+     */
+
+    console.error(
+      "WEATHER ROUTE ERROR:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "Počasí se nepodařilo načíst." },
-      { status: 500 }
+      {
+        error:
+          "Počasí se nepodařilo načíst.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
