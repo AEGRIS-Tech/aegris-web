@@ -8,6 +8,8 @@ const PROTECTED_ROUTES = [
   "/reports",
   "/settings",
   "/ai",
+  "/support",
+  "/admin",
 ];
 
 function isProtectedPath(pathname: string) {
