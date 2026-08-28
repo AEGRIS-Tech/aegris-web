@@ -1,86 +1,235 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
 
 export default function AcceptInvitePage() {
   const router = useRouter();
+  const initializedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] =
+    useState("");
 
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
   useEffect(() => {
-    let active = true;
-
-    async function verifyDemoUser() {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (!active) return;
-
-      if (userError || !user) {
-        console.error(
-          "DEMO USER VERIFY ERROR:",
-          userError
-        );
-
-        setErrorMessage(
-          "Pozvánka je neplatná nebo již vypršela."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
-        .from("profiles")
-        .select("account_type")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (!active) return;
-
-      if (profileError) {
-        console.error(
-          "DEMO PROFILE VERIFY ERROR:",
-          profileError
-        );
-
-        setErrorMessage(
-          "Pozvánku se nepodařilo ověřit."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      if (
-        profile?.account_type !== "demo"
-      ) {
-        setErrorMessage(
-          "Tato stránka je určena pouze pro aktivaci DEMO účtu."
-        );
-
-        setLoading(false);
-        return;
-      }
-
-      setLoading(false);
+    if (initializedRef.current) {
+      return;
     }
 
-    void verifyDemoUser();
+    initializedRef.current = true;
+
+    let active = true;
+
+    async function initializeInvite() {
+      try {
+        /*
+         * Supabase invite link po ověření uživatele
+         * přesměruje na tuto stránku se session tokeny
+         * v URL fragmentu:
+         *
+         * #access_token=...
+         * &refresh_token=...
+         * &type=invite
+         *
+         * Fragment (#...) se neposílá serveru, proto jej
+         * musíme zpracovat přímo v browseru.
+         */
+
+        const hashParams = new URLSearchParams(
+          window.location.hash.startsWith("#")
+            ? window.location.hash.slice(1)
+            : window.location.hash
+        );
+
+        const authError =
+          hashParams.get("error_description") ||
+          hashParams.get("error");
+
+        if (authError) {
+          console.error(
+            "DEMO INVITE URL ERROR:",
+            authError
+          );
+
+          if (active) {
+            setErrorMessage(
+              "Pozvánka je neplatná nebo již vypršela."
+            );
+            setLoading(false);
+          }
+
+          return;
+        }
+
+        const accessToken =
+          hashParams.get("access_token");
+
+        const refreshToken =
+          hashParams.get("refresh_token");
+
+        /*
+         * Pokud jsme přišli přímo z invitačního e-mailu,
+         * explicitně vytvoříme browser session.
+         */
+        if (accessToken && refreshToken) {
+          const {
+            error: sessionError,
+          } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (sessionError) {
+            console.error(
+              "DEMO SET SESSION ERROR:",
+              sessionError
+            );
+
+            if (active) {
+              setErrorMessage(
+                "Pozvánku se nepodařilo ověřit. Otevřete prosím aktivační odkaz znovu."
+              );
+              setLoading(false);
+            }
+
+            return;
+          }
+
+          /*
+           * Po úspěšném převzetí session odstraníme tokeny
+           * z adresního řádku.
+           */
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname +
+              window.location.search
+          );
+        } else {
+          /*
+           * Pokud URL tokeny nemá, může už session existovat
+           * například po předchozím zpracování odkazu.
+           */
+          const {
+            data: { session },
+            error: sessionCheckError,
+          } = await supabase.auth.getSession();
+
+          if (
+            sessionCheckError ||
+            !session
+          ) {
+            console.error(
+              "DEMO SESSION VERIFY ERROR:",
+              sessionCheckError
+            );
+
+            if (active) {
+              setErrorMessage(
+                "Pozvánka je neplatná nebo již vypršela."
+              );
+              setLoading(false);
+            }
+
+            return;
+          }
+        }
+
+        /*
+         * Session nestačí. Ověříme uživatele přímo
+         * proti Supabase Auth.
+         */
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (!active) {
+          return;
+        }
+
+        if (userError || !user) {
+          console.error(
+            "DEMO USER VERIFY ERROR:",
+            userError
+          );
+
+          setErrorMessage(
+            "Pozvánka je neplatná nebo již vypršela."
+          );
+          setLoading(false);
+
+          return;
+        }
+
+        /*
+         * DEMO oprávnění musí potvrdit databázový profil.
+         */
+        const {
+          data: profile,
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .select("account_type")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!active) {
+          return;
+        }
+
+        if (profileError) {
+          console.error(
+            "DEMO PROFILE VERIFY ERROR:",
+            profileError
+          );
+
+          setErrorMessage(
+            "Pozvánku se nepodařilo ověřit."
+          );
+          setLoading(false);
+
+          return;
+        }
+
+        if (
+          profile?.account_type !==
+          "demo"
+        ) {
+          setErrorMessage(
+            "Tato stránka je určena pouze pro aktivaci DEMO účtu."
+          );
+          setLoading(false);
+
+          return;
+        }
+
+        setErrorMessage("");
+        setLoading(false);
+      } catch (error) {
+        console.error(
+          "DEMO INVITE INITIALIZATION ERROR:",
+          error
+        );
+
+        if (active) {
+          setErrorMessage(
+            "Nepodařilo se ověřit DEMO pozvánku."
+          );
+          setLoading(false);
+        }
+      }
+    }
+
+    void initializeInvite();
 
     return () => {
       active = false;
@@ -88,7 +237,9 @@ export default function AcceptInvitePage() {
   }, []);
 
   async function handleSetPassword() {
-    if (saving) return;
+    if (saving) {
+      return;
+    }
 
     setErrorMessage("");
 
@@ -110,13 +261,9 @@ export default function AcceptInvitePage() {
 
     try {
       /*
-       * Autorizační stav ověřujeme znovu těsně před
-       * změnou hesla.
-       *
-       * Nestačí pouze to, že uživatel měl při načtení
-       * stránky nějakou session.
+       * Autorizační stav ověřujeme znovu těsně
+       * před změnou hesla.
        */
-
       const {
         data: { user },
         error: userError,
@@ -136,13 +283,9 @@ export default function AcceptInvitePage() {
       }
 
       /*
-       * profiles.account_type je autoritativní serverem
-       * řízený údaj.
-       *
-       * Běžný authenticated uživatel má na profiles pouze
-       * SELECT vlastního profilu a nemůže account_type měnit.
+       * profiles.account_type je autoritativní údaj
+       * pro povolení DEMO aktivace.
        */
-
       const {
         data: profile,
         error: profileError,
@@ -166,7 +309,8 @@ export default function AcceptInvitePage() {
       }
 
       if (
-        profile?.account_type !== "demo"
+        profile?.account_type !==
+        "demo"
       ) {
         setErrorMessage(
           "Tento účet není oprávněn dokončit DEMO aktivaci."
