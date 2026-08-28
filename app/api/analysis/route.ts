@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { fetchProjectWeather } from "@/lib/server/weather";
+import { requireAccountAccess } from "@/lib/auth/account-access";
 import {
   evaluateProjectContext,
   type CropProfile,
@@ -280,38 +281,19 @@ export async function POST(request: Request) {
       }
     );
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const access = await requireAccountAccess(supabase);
 
-    if (userError || !user) {
+    if (!access.ok) {
       return NextResponse.json(
-        { error: "Uživatel není přihlášen." },
-        { status: 401 }
-      );
-    }
-
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!serviceRoleKey) {
-      console.error("CHYBÍ SUPABASE_SERVICE_ROLE_KEY");
-      return NextResponse.json(
-        { error: "Server nemá nakonfigurovaný Supabase service role key." },
-        { status: 500 }
-      );
-    }
-
-    const serviceSupabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      serviceRoleKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
+        {
+          error: access.message,
+          code: access.code,
         },
-      }
-    );
+        { status: access.status }
+      );
+    }
+
+    const user = access.user;
 
     const url = new URL(request.url);
     const projectIdParam = url.searchParams.get("projectId");
@@ -346,6 +328,27 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!serviceRoleKey) {
+      console.error("CHYBÍ SUPABASE_SERVICE_ROLE_KEY");
+      return NextResponse.json(
+        { error: "Server nemá nakonfigurovaný Supabase service role key." },
+        { status: 500 }
+      );
+    }
+
+    const serviceSupabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
 
     const staleBefore = new Date(
       Date.now() - ANALYSIS_LOCK_STALE_SECONDS * 1000
