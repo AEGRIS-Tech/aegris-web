@@ -1,6 +1,8 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import { getAdminDemoOverview } from "@/lib/admin/demo";
+
+import DemoRequestActions from "./DemoRequestActions";
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -23,15 +25,62 @@ function formatDate(value: string | null) {
 }
 
 function getStatusClasses(status: string) {
-  if (status === "contacted") {
-    return "border-cyan-500/20 bg-cyan-500/10 text-cyan-300";
-  }
+  switch (status) {
+    case "new":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-300";
 
-  return "border-slate-700 bg-slate-800 text-slate-300";
+    case "approved":
+      return "border-violet-500/20 bg-violet-500/10 text-violet-300";
+
+    case "processing":
+      return "border-blue-500/20 bg-blue-500/10 text-blue-300";
+
+    case "contacted":
+      return "border-cyan-500/20 bg-cyan-500/10 text-cyan-300";
+
+    case "rejected":
+      return "border-rose-500/20 bg-rose-500/10 text-rose-300";
+
+    case "closed":
+      return "border-slate-600 bg-slate-800 text-slate-400";
+
+    default:
+      return "border-slate-700 bg-slate-800 text-slate-300";
+  }
+}
+
+function getStatusLabel(status: string) {
+  switch (status) {
+    case "new":
+      return "Čeká na rozhodnutí";
+
+    case "approved":
+      return "Schváleno";
+
+    case "processing":
+      return "Aktivace";
+
+    case "contacted":
+      return "Aktivováno";
+
+    case "rejected":
+      return "Zamítnuto";
+
+    case "closed":
+      return "Uzavřeno";
+
+    default:
+      return status;
+  }
 }
 
 export default async function AdminDemoPage() {
   const overview = await getAdminDemoOverview();
+
+  const pendingRequests =
+    overview.requests.filter(
+      (request) => request.status === "new"
+    ).length;
 
   return (
     <>
@@ -47,10 +96,20 @@ export default async function AdminDemoPage() {
             </h2>
           </div>
 
-          <div className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5">
-            <span className="text-xs font-medium text-slate-300">
-              {overview.totalRequests} žádostí
-            </span>
+          <div className="flex items-center gap-2">
+            {pendingRequests > 0 && (
+              <div className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1.5">
+                <span className="text-xs font-medium text-amber-300">
+                  {pendingRequests} čeká
+                </span>
+              </div>
+            )}
+
+            <div className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5">
+              <span className="text-xs font-medium text-slate-300">
+                {overview.totalRequests} žádostí
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -62,42 +121,52 @@ export default async function AdminDemoPage() {
           </h3>
 
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-            Přehled DEMO žádostí, aktivních účtů, expirací
-            a napojení žádostí na uživatele AEGRIS.
+            Schvalování DEMO žádostí, řízení délky
+            přístupu, aktivní účty a expirace.
           </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Žádosti celkem</p>
+            <p className="text-sm text-slate-400">
+              Žádosti celkem
+            </p>
             <p className="mt-3 text-3xl font-semibold">
               {overview.totalRequests}
             </p>
           </section>
 
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Contacted</p>
-            <p className="mt-3 text-3xl font-semibold text-cyan-300">
-              {overview.contactedRequests}
+            <p className="text-sm text-slate-400">
+              Čeká na rozhodnutí
+            </p>
+            <p className="mt-3 text-3xl font-semibold text-amber-300">
+              {pendingRequests}
             </p>
           </section>
 
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">DEMO profily</p>
+            <p className="text-sm text-slate-400">
+              DEMO profily
+            </p>
             <p className="mt-3 text-3xl font-semibold">
               {overview.demoProfilesTotal}
             </p>
           </section>
 
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Aktivní DEMO</p>
+            <p className="text-sm text-slate-400">
+              Aktivní DEMO
+            </p>
             <p className="mt-3 text-3xl font-semibold text-emerald-300">
               {overview.activeDemos}
             </p>
           </section>
 
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Expirované DEMO</p>
+            <p className="text-sm text-slate-400">
+              Expirované DEMO
+            </p>
             <p className="mt-3 text-3xl font-semibold text-rose-300">
               {overview.expiredDemos}
             </p>
@@ -106,9 +175,13 @@ export default async function AdminDemoPage() {
 
         <section className="mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
           <div className="border-b border-slate-800 px-6 py-5">
-            <h3 className="font-semibold">DEMO žádosti</h3>
+            <h3 className="font-semibold">
+              DEMO žádosti
+            </h3>
+
             <p className="mt-1 text-sm text-slate-500">
-              Aktuální stav onboardingových žádostí.
+              Nové žádosti musí před aktivací
+              schválit administrátor.
             </p>
           </div>
 
@@ -119,26 +192,37 @@ export default async function AdminDemoPage() {
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Žadatel
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Firma
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Status
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Žádost
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     DEMO začátek
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Expirace
                   </th>
+
                   <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Zbývá
                   </th>
+
                   <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Účet
+                  </th>
+
+                  <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Akce
                   </th>
                 </tr>
               </thead>
@@ -147,12 +231,13 @@ export default async function AdminDemoPage() {
                 {overview.requests.map((request) => (
                   <tr
                     key={request.id}
-                    className="transition hover:bg-slate-800/30"
+                    className="align-top transition hover:bg-slate-800/30"
                   >
                     <td className="px-5 py-4">
                       <div>
                         <p className="font-medium text-slate-100">
-                          {request.fullName ?? "Bez jména"}
+                          {request.fullName ??
+                            "Bez jména"}
                         </p>
 
                         <p className="mt-1 text-sm text-slate-500">
@@ -173,41 +258,51 @@ export default async function AdminDemoPage() {
 
                     <td className="px-5 py-4">
                       <span
-                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
+                        className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
                           request.status
                         )}`}
                       >
-                        {request.status}
+                        {getStatusLabel(
+                          request.status
+                        )}
                       </span>
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-400">
-                      {formatDate(request.createdAt)}
+                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-400">
+                      {formatDate(
+                        request.createdAt
+                      )}
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-400">
-                      {formatDate(request.demoStartedAt)}
+                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-400">
+                      {formatDate(
+                        request.demoStartedAt
+                      )}
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-400">
-                      {formatDate(request.demoExpiresAt)}
+                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-400">
+                      {formatDate(
+                        request.demoExpiresAt
+                      )}
                     </td>
 
-                    <td className="px-5 py-4">
+                    <td className="whitespace-nowrap px-5 py-4">
                       {request.isActive ? (
                         <span className="text-sm font-medium text-emerald-300">
                           {request.daysRemaining} dní
                         </span>
                       ) : request.isExpired ? (
                         <span className="text-sm font-medium text-rose-300">
-                          Expired
+                          Expirováno
                         </span>
                       ) : (
-                        <span className="text-sm text-slate-500">—</span>
+                        <span className="text-sm text-slate-500">
+                          —
+                        </span>
                       )}
                     </td>
 
-                    <td className="px-5 py-4 text-right">
+                    <td className="whitespace-nowrap px-5 py-4 text-right">
                       {request.matchedUserId ? (
                         <Link
                           href={`/admin/customers/${request.matchedUserId}`}
@@ -221,16 +316,25 @@ export default async function AdminDemoPage() {
                         </span>
                       )}
                     </td>
+
+                    <td className="px-5 py-4 text-right">
+                      <DemoRequestActions
+                        requestId={request.id}
+                        status={request.status}
+                      />
+                    </td>
                   </tr>
                 ))}
 
-                {overview.requests.length === 0 && (
+                {overview.requests.length ===
+                  0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="px-5 py-12 text-center text-sm text-slate-500"
                     >
-                      Nejsou evidované žádné DEMO žádosti.
+                      Nejsou evidované žádné DEMO
+                      žádosti.
                     </td>
                   </tr>
                 )}
@@ -241,9 +345,11 @@ export default async function AdminDemoPage() {
 
         <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 px-5 py-4">
           <p className="text-xs leading-5 text-slate-500">
-            DEMO management je zatím read-only. Prodloužení,
-            deaktivace a další zásahy přidáme až přes auditované
-            serverové akce.
+            Nové DEMO žádosti čekají na ruční
+            schválení administrátorem. Po schválení
+            worker vytvoří pozvánku a DEMO účet se
+            zvolenou délkou přístupu. Zamítnuté
+            žádosti se neaktivují.
           </p>
         </div>
       </div>

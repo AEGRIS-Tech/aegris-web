@@ -1,9 +1,23 @@
 import { NextResponse } from "next/server";
+
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const DEMO_DURATION_DAYS = 14;
+const DEFAULT_DEMO_DURATION_DAYS = 14;
 const DEMO_BATCH_SIZE = 10;
 const DEMO_STALE_AFTER_SECONDS = 15 * 60;
+
+function getDemoDurationDays(value: unknown) {
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 365
+  ) {
+    return value;
+  }
+
+  return DEFAULT_DEMO_DURATION_DAYS;
+}
 
 export async function POST(request: Request) {
   try {
@@ -49,10 +63,10 @@ export async function POST(request: Request) {
       new URL(request.url).origin;
 
     const redirectTo =
-  `${appUrl}/auth/accept-invite`;
+      `${appUrl}/auth/accept-invite`;
 
     // ============================================
-    // ATOMICKÝ CLAIM DEMO ŽÁDOSTÍ
+    // ATOMICKÝ CLAIM SCHVÁLENÝCH DEMO ŽÁDOSTÍ
     // ============================================
 
     const {
@@ -94,7 +108,7 @@ export async function POST(request: Request) {
         skipped: 0,
         total: 0,
         message:
-          "Žádné nové DEMO žádosti ke zpracování.",
+          "Žádné schválené DEMO žádosti ke zpracování.",
       });
     }
 
@@ -112,12 +126,11 @@ export async function POST(request: Request) {
       const { error } = await supabaseAdmin
         .from("demo_requests")
         .update({
-          status: "new",
+          status: "approved",
           processing_started_at: null,
         })
         .eq("id", requestId)
-        .eq("status", "processing")
-        .is("approved_at", null);
+        .eq("status", "processing");
 
       if (error) {
         console.error(
@@ -138,23 +151,16 @@ export async function POST(request: Request) {
         .update({
           status: "closed",
           user_id: userId,
-          approved_at: null,
           processing_started_at: null,
         })
         .eq("id", requestId)
-        .eq("status", "processing")
-        .is("approved_at", null);
+        .eq("status", "processing");
 
       return error;
     }
 
     // ============================================
     // AUTH UŽIVATELÉ
-    // ============================================
-    //
-    // Načteme Auth uživatele po stránkách.
-    // Nepředpokládáme, že systém bude mít vždy
-    // méně než 1000 uživatelů.
     // ============================================
 
     const authUsersByEmail =
@@ -179,8 +185,6 @@ export async function POST(request: Request) {
           usersError
         );
 
-        // Claimy ještě nebyly individuálně zpracovány,
-        // takže je můžeme bezpečně vrátit do "new".
         for (const demoRequest of demoRequests) {
           await releaseClaim(demoRequest.id);
         }
@@ -226,6 +230,39 @@ export async function POST(request: Request) {
     for (const demoRequest of demoRequests) {
       try {
         // ========================================
+        // NAČTENÍ ADMIN NASTAVENÍ DEMO
+        // ========================================
+
+        const {
+          data: requestSettings,
+          error: requestSettingsError,
+        } = await supabaseAdmin
+          .from("demo_requests")
+          .select(
+            "demo_duration_days, approved_at, decided_by"
+          )
+          .eq("id", demoRequest.id)
+          .maybeSingle();
+
+        if (
+          requestSettingsError ||
+          !requestSettings
+        ) {
+          console.error(
+            `CHYBA NAČTENÍ NASTAVENÍ DEMO ŽÁDOSTI ${demoRequest.id}:`,
+            requestSettingsError
+          );
+
+          failed++;
+          continue;
+        }
+
+        const durationDays =
+          getDemoDurationDays(
+            requestSettings.demo_duration_days
+          );
+
+        // ========================================
         // VALIDACE E-MAILU
         // ========================================
 
@@ -246,8 +283,7 @@ export async function POST(request: Request) {
                 processing_started_at: null,
               })
               .eq("id", demoRequest.id)
-              .eq("status", "processing")
-              .is("approved_at", null);
+              .eq("status", "processing");
 
           if (closeError) {
             console.error(
@@ -271,10 +307,6 @@ export async function POST(request: Request) {
         // ========================================
         // URČENÍ AUTH UŽIVATELE
         // ========================================
-        //
-        // user_id může být vyplněné po předchozím
-        // částečně dokončeném běhu.
-        // ========================================
 
         let userId: string | null =
           demoRequest.user_id ?? null;
@@ -286,16 +318,6 @@ export async function POST(request: Request) {
 
         // ========================================
         // EXISTUJÍCÍ AUTH ÚČET
-        // ========================================
-        //
-        // Pokud žádost ještě nemá user_id a Auth
-        // účet již existuje, musíme rozlišit:
-        //
-        // 1) účet vytvořený právě touto DEMO žádostí
-        //    při předchozím nedokončeném běhu,
-        //
-        // 2) skutečně existující účet zákazníka,
-        //    který veřejná DEMO žádost nesmí změnit.
         // ========================================
 
         if (
@@ -356,11 +378,6 @@ export async function POST(request: Request) {
                     company:
                       demoRequest.company,
                     account_type: "demo",
-
-                    // Umožní rozeznat účet vytvořený
-                    // touto konkrétní DEMO žádostí,
-                    // pokud worker spadne těsně po
-                    // vytvoření Auth uživatele.
                     demo_request_id:
                       String(
                         demoRequest.id
@@ -378,8 +395,6 @@ export async function POST(request: Request) {
               inviteError
             );
 
-            // Pozvánka nebyla potvrzeně vytvořena.
-            // Claim vrátíme do fronty.
             await releaseClaim(
               demoRequest.id
             );
@@ -399,11 +414,6 @@ export async function POST(request: Request) {
           // ======================================
           // ULOŽENÍ USER_ID IHNED PO POZVÁNCE
           // ======================================
-          //
-          // Toto je důležité pro recovery.
-          // Pokud další krok selže, stale claim
-          // může pokračovat se stejným uživatelem.
-          // ======================================
 
           const {
             error: linkUserError,
@@ -413,8 +423,7 @@ export async function POST(request: Request) {
               user_id: userId,
             })
             .eq("id", demoRequest.id)
-            .eq("status", "processing")
-            .is("approved_at", null);
+            .eq("status", "processing");
 
           if (linkUserError) {
             console.error(
@@ -422,16 +431,11 @@ export async function POST(request: Request) {
               linkUserError
             );
 
-            // Claim záměrně ponecháme jako
-            // processing. Pokud byl Auth účet
-            // skutečně vytvořen, metadata
-            // demo_request_id umožní recovery.
             failed++;
             continue;
           }
         }
 
-        // TypeScript guard.
         if (!userId) {
           console.error(
             `DEMO ŽÁDOST ${demoRequest.id}: chybí user_id po vytvoření účtu.`
@@ -445,10 +449,8 @@ export async function POST(request: Request) {
         // EXISTUJÍCÍ DEMO PROFIL
         // ========================================
         //
-        // Pokud předchozí běh vytvořil profil,
-        // ale nestihl označit request jako contacted,
-        // zachováme původní datum začátku a expirace.
-        // Demo se tedy při retry neprodlouží.
+        // Při retry zachováme původní začátek
+        // i expiraci. DEMO se tedy samo neprodlouží.
         // ========================================
 
         const {
@@ -484,12 +486,10 @@ export async function POST(request: Request) {
             .demo_expires_at
         ) {
           startedAtIso =
-            existingProfile
-              .demo_started_at;
+            existingProfile.demo_started_at;
 
           expiresAtIso =
-            existingProfile
-              .demo_expires_at;
+            existingProfile.demo_expires_at;
         } else {
           const startedAt =
             new Date();
@@ -497,7 +497,7 @@ export async function POST(request: Request) {
           const expiresAt =
             new Date(
               startedAt.getTime() +
-                DEMO_DURATION_DAYS *
+                durationDays *
                   24 *
                   60 *
                   60 *
@@ -539,15 +539,17 @@ export async function POST(request: Request) {
             profileError
           );
 
-          // user_id už je uložené.
-          // Claim ponecháme processing a po
-          // stale timeoutu může bezpečně pokračovat.
           failed++;
           continue;
         }
 
         // ========================================
         // DOKONČENÍ DEMO ŽÁDOSTI
+        // ========================================
+        //
+        // approved_at zůstává okamžikem, kdy admin
+        // žádost schválil. Skutečný začátek DEMO je
+        // uložen v profiles.demo_started_at.
         // ========================================
 
         const {
@@ -558,15 +560,12 @@ export async function POST(request: Request) {
           .update({
             status: "contacted",
             user_id: userId,
-            approved_at:
-              startedAtIso,
             processing_started_at:
               null,
           })
           .eq("id", demoRequest.id)
           .eq("status", "processing")
           .eq("user_id", userId)
-          .is("approved_at", null)
           .select("id")
           .maybeSingle();
 
@@ -584,6 +583,19 @@ export async function POST(request: Request) {
           continue;
         }
 
+        console.info(
+          "AEGRIS DEMO ACTIVATED:",
+          {
+            requestId: demoRequest.id,
+            userId,
+            durationDays,
+            approvedAt:
+              requestSettings.approved_at,
+            startedAt: startedAtIso,
+            expiresAt: expiresAtIso,
+          }
+        );
+
         processed++;
       } catch (error) {
         console.error(
@@ -591,10 +603,9 @@ export async function POST(request: Request) {
           error
         );
 
-        // Záměrně claim automaticky neuvolňujeme.
-        // Nevíme, ve které fázi chyba nastala.
-        // Stale recovery je bezpečnější než
-        // okamžitá duplicitní aktivace.
+        // Claim automaticky neuvolňujeme.
+        // Nevíme, ve které fázi zpracování chyba
+        // nastala. Stale recovery je bezpečnější.
         failed++;
       }
     }
