@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { getAdminSupportTicketDetail } from "@/lib/admin/support-detail";
 
+import SupportReplyForm from "./SupportReplyForm";
 import SupportStatusActions from "./SupportStatusActions";
 
 type AdminSupportTicketPageProps = {
@@ -60,11 +61,14 @@ export default async function AdminSupportTicketPage({
     notFound();
   }
 
-  const ticket = await getAdminSupportTicketDetail(ticketId);
+  const ticket =
+    await getAdminSupportTicketDetail(ticketId);
 
   if (!ticket) {
     notFound();
   }
+
+  const isResolved = ticket.status === "resolved";
 
   return (
     <main className="space-y-6">
@@ -106,21 +110,115 @@ export default async function AdminSupportTicketPage({
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-white">
-              Zpráva zákazníka
-            </h2>
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-white">
+                Konverzace
+              </h2>
 
-            <p className="mt-1 text-sm text-white/45">
-              Původní obsah support požadavku.
-            </p>
-          </div>
+              <p className="mt-1 text-sm text-white/45">
+                Kompletní komunikace k tomuto support ticketu.
+              </p>
+            </div>
 
-          <div className="whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-5 text-sm leading-7 text-white/80">
-            {ticket.message}
-          </div>
-        </section>
+            <div className="space-y-4">
+              <article className="rounded-xl border border-white/10 bg-black/20 p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-white">
+                      {ticket.customerEmail ?? "Zákazník"}
+                    </div>
+
+                    <div className="mt-1 text-xs text-white/35">
+                      Původní zpráva zákazníka
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-white/35">
+                    {formatDate(ticket.createdAt)}
+                  </div>
+                </div>
+
+                <div className="whitespace-pre-wrap text-sm leading-7 text-white/80">
+                  {ticket.message}
+                </div>
+              </article>
+
+              {ticket.messages.map((message) => {
+                const isAdmin =
+                  message.authorRole === "admin";
+
+                return (
+                  <article
+                    key={message.id}
+                    className={
+                      isAdmin
+                        ? "ml-auto max-w-[92%] rounded-xl border border-cyan-400/20 bg-cyan-400/[0.07] p-5"
+                        : "mr-auto max-w-[92%] rounded-xl border border-white/10 bg-black/20 p-5"
+                    }
+                  >
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div
+                          className={
+                            isAdmin
+                              ? "text-sm font-medium text-cyan-300"
+                              : "text-sm font-medium text-white"
+                          }
+                        >
+                          {isAdmin
+                            ? "AEGRIS Support"
+                            : ticket.customerEmail ??
+                              "Zákazník"}
+                        </div>
+
+                        <div className="mt-1 text-xs text-white/35">
+                          {isAdmin
+                            ? "Odpověď administrátora"
+                            : "Odpověď zákazníka"}
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-white/35">
+                        {formatDate(message.createdAt)}
+                      </div>
+                    </div>
+
+                    <div className="whitespace-pre-wrap text-sm leading-7 text-white/80">
+                      {message.message}
+                    </div>
+                  </article>
+                );
+              })}
+
+              {ticket.messages.length === 0 && (
+                <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm text-white/40">
+                  K ticketu zatím nebyly přidány žádné
+                  další zprávy.
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-white">
+                Odpověď
+              </h2>
+
+              <p className="mt-1 text-sm text-white/45">
+                Odpověď bude přidána do konverzace se
+                zákazníkem.
+              </p>
+            </div>
+
+            <SupportReplyForm
+              ticketId={ticket.id}
+              disabled={isResolved}
+            />
+          </section>
+        </div>
 
         <aside className="space-y-6">
           <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
@@ -135,7 +233,8 @@ export default async function AdminSupportTicketPage({
                 </div>
 
                 <div className="mt-1 break-all text-sm text-white/80">
-                  {ticket.customerEmail ?? "Neznámý zákazník"}
+                  {ticket.customerEmail ??
+                    "Neznámý zákazník"}
                 </div>
               </div>
 

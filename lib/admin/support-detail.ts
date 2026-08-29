@@ -2,6 +2,15 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export type AdminSupportTicketMessage = {
+  id: number;
+  ticketId: number;
+  authorUserId: string | null;
+  authorRole: "customer" | "admin";
+  message: string;
+  createdAt: string;
+};
+
 export type AdminSupportTicketDetail = {
   id: number;
   userId: string;
@@ -13,6 +22,7 @@ export type AdminSupportTicketDetail = {
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
+  messages: AdminSupportTicketMessage[];
 };
 
 type SupportTicketRow = {
@@ -27,6 +37,15 @@ type SupportTicketRow = {
   resolved_at: string | null;
 };
 
+type SupportMessageRow = {
+  id: number;
+  ticket_id: number;
+  author_user_id: string | null;
+  author_role: "customer" | "admin";
+  message: string;
+  created_at: string;
+};
+
 export async function getAdminSupportTicketDetail(
   ticketId: number
 ): Promise<AdminSupportTicketDetail | null> {
@@ -34,26 +53,31 @@ export async function getAdminSupportTicketDetail(
     return null;
   }
 
-  const { data: ticket, error: ticketError } = await supabaseAdmin
-    .from("support_tickets")
-    .select(
-      `
-        id,
-        user_id,
-        subject,
-        message,
-        status,
-        priority,
-        created_at,
-        updated_at,
-        resolved_at
-      `
-    )
-    .eq("id", ticketId)
-    .maybeSingle<SupportTicketRow>();
+  const { data: ticket, error: ticketError } =
+    await supabaseAdmin
+      .from("support_tickets")
+      .select(
+        `
+          id,
+          user_id,
+          subject,
+          message,
+          status,
+          priority,
+          created_at,
+          updated_at,
+          resolved_at
+        `
+      )
+      .eq("id", ticketId)
+      .maybeSingle<SupportTicketRow>();
 
   if (ticketError) {
-    console.error("AEGRIS ADMIN SUPPORT DETAIL LOAD FAILED:", ticketError);
+    console.error(
+      "AEGRIS ADMIN SUPPORT DETAIL LOAD FAILED:",
+      ticketError
+    );
+
     throw new Error("Failed to load support ticket.");
   }
 
@@ -61,11 +85,51 @@ export async function getAdminSupportTicketDetail(
     return null;
   }
 
+  const { data: messageRows, error: messagesError } =
+    await supabaseAdmin
+      .from("support_ticket_messages")
+      .select(
+        `
+          id,
+          ticket_id,
+          author_user_id,
+          author_role,
+          message,
+          created_at
+        `
+      )
+      .eq("ticket_id", ticketId)
+      .order("created_at", {
+        ascending: true,
+      });
+
+  if (messagesError) {
+    console.error(
+      "AEGRIS ADMIN SUPPORT MESSAGES LOAD FAILED:",
+      messagesError
+    );
+
+    throw new Error("Failed to load support messages.");
+  }
+
+  const messages = (
+    (messageRows ?? []) as SupportMessageRow[]
+  ).map((row) => ({
+    id: row.id,
+    ticketId: row.ticket_id,
+    authorUserId: row.author_user_id,
+    authorRole: row.author_role,
+    message: row.message,
+    createdAt: row.created_at,
+  }));
+
   let customerEmail: string | null = null;
 
   try {
     const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.getUserById(ticket.user_id);
+      await supabaseAdmin.auth.admin.getUserById(
+        ticket.user_id
+      );
 
     if (authError) {
       console.error(
@@ -73,7 +137,8 @@ export async function getAdminSupportTicketDetail(
         authError
       );
     } else {
-      customerEmail = authData.user?.email ?? null;
+      customerEmail =
+        authData.user?.email ?? null;
     }
   } catch (error) {
     console.error(
@@ -93,5 +158,6 @@ export async function getAdminSupportTicketDetail(
     createdAt: ticket.created_at,
     updatedAt: ticket.updated_at,
     resolvedAt: ticket.resolved_at,
+    messages,
   };
 }
