@@ -41,10 +41,22 @@ function normalizeEmail(
 }
 
 function getDemoState(
+  accountType: string | null,
   demoStartedAt: string | null,
   demoExpiresAt: string | null
 ) {
-  if (!demoExpiresAt) {
+  if (accountType === "expired") {
+    return {
+      daysRemaining: null,
+      isActive: false,
+      isExpired: true,
+    };
+  }
+
+  if (
+    accountType !== "demo" ||
+    !demoExpiresAt
+  ) {
     return {
       daysRemaining: null,
       isActive: false,
@@ -199,30 +211,22 @@ export async function getAdminDemoOverview(): Promise<AdminDemoOverview> {
             : undefined;
 
         const demoState = getDemoState(
+          profile?.account_type ?? null,
           profile?.demo_started_at ?? null,
           profile?.demo_expires_at ?? null
         );
 
         return {
           id: request.id,
-          fullName:
-            request.full_name,
-          company:
-            request.company,
-          email:
-            request.email,
-          phone:
-            request.phone,
-          message:
-            request.message,
-          status:
-            request.status,
-          createdAt:
-            request.created_at,
-          userId:
-            request.user_id,
-          approvedAt:
-            request.approved_at,
+          fullName: request.full_name,
+          company: request.company,
+          email: request.email,
+          phone: request.phone,
+          message: request.message,
+          status: request.status,
+          createdAt: request.created_at,
+          userId: request.user_id,
+          approvedAt: request.approved_at,
           processingStartedAt:
             request.processing_started_at,
 
@@ -232,24 +236,18 @@ export async function getAdminDemoOverview(): Promise<AdminDemoOverview> {
             profile?.account_type ?? null,
 
           demoStartedAt:
-            profile?.demo_started_at ??
-            null,
+            profile?.demo_started_at ?? null,
 
           demoExpiresAt:
-            profile?.demo_expires_at ??
-            null,
+            profile?.demo_expires_at ?? null,
 
           daysRemaining:
             demoState.daysRemaining,
 
           isActive:
-            profile?.account_type ===
-              "demo" &&
             demoState.isActive,
 
           isExpired:
-            profile?.account_type ===
-              "demo" &&
             demoState.isExpired,
         };
       }
@@ -260,6 +258,8 @@ export async function getAdminDemoOverview(): Promise<AdminDemoOverview> {
       (request) =>
         request.status === "contacted"
     ).length;
+
+  const now = Date.now();
 
   const activeDemos =
     profiles.filter((profile) => {
@@ -276,12 +276,16 @@ export async function getAdminDemoOverview(): Promise<AdminDemoOverview> {
 
       return (
         Number.isFinite(expiresAt) &&
-        expiresAt > Date.now()
+        expiresAt > now
       );
     }).length;
 
   const expiredDemos =
     profiles.filter((profile) => {
+      if (profile.account_type === "expired") {
+        return true;
+      }
+
       if (
         profile.account_type !== "demo" ||
         !profile.demo_expires_at
@@ -295,14 +299,15 @@ export async function getAdminDemoOverview(): Promise<AdminDemoOverview> {
 
       return (
         Number.isFinite(expiresAt) &&
-        expiresAt <= Date.now()
+        expiresAt <= now
       );
     }).length;
 
   const demoProfilesTotal =
     profiles.filter(
       (profile) =>
-        profile.account_type === "demo"
+        profile.account_type === "demo" ||
+        profile.account_type === "expired"
     ).length;
 
   return {

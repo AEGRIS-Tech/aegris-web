@@ -321,6 +321,8 @@ export default async function AdminDemoPage() {
                       <DemoRequestActions
                         requestId={request.id}
                         status={request.status}
+                        accountType={request.accountType}
+                        demoExpiresAt={request.demoExpiresAt}
                       />
                     </td>
                   </tr>
