@@ -1,23 +1,30 @@
 "use client";
 
-import { Database, BrainCircuit, ShieldCheck } from "lucide-react";
+import {
+  Database,
+  BrainCircuit,
+  ShieldCheck,
+} from "lucide-react";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function Platform() {
+  const { t } = useLanguage();
+
   const items = [
     {
       icon: <Database size={36} />,
-      title: "Centrální data",
-      text: "Všechna firemní data na jednom bezpečném místě.",
+      title: t.platform.items[0].title,
+      text: t.platform.items[0].text,
     },
     {
       icon: <BrainCircuit size={36} />,
-      title: "AI Analýza",
-      text: "Automatická analýza a doporučení v reálném čase.",
+      title: t.platform.items[1].title,
+      text: t.platform.items[1].text,
     },
     {
       icon: <ShieldCheck size={36} />,
-      title: "Bezpečnost",
-      text: "Moderní šifrování a řízení přístupových práv.",
+      title: t.platform.items[2].title,
+      text: t.platform.items[2].text,
     },
   ];
 
@@ -26,13 +33,15 @@ export default function Platform() {
       <div className="max-w-7xl mx-auto">
 
         <h2 className="text-5xl font-bold text-center mb-5">
-          Jedna platforma.
-          <span className="text-cyan-400"> Nekonečné možnosti.</span>
+          {t.platform.title}
+          <span className="text-cyan-400">
+            {" "}
+            {t.platform.highlight}
+          </span>
         </h2>
 
         <p className="text-center text-slate-400 max-w-3xl mx-auto mb-20">
-          AEGRIS propojuje data, umělou inteligenci a automatizaci do
-          jednoho systému připraveného pro firmy budoucnosti.
+          {t.platform.subtitle}
         </p>
 
         <div className="grid md:grid-cols-3 gap-8">

@@ -1,34 +1,21 @@
+"use client";
+
+import { useLanguage } from "../context/LanguageContext";
+
 export default function Features() {
-  const features = [
-    {
-      icon: "🛰️",
-      title: "Letecká analýza",
-      description:
-        "Zpracování snímků z dronů, letadel a satelitů pomocí AI.",
-    },
-    {
-      icon: "🤖",
-      title: "Umělá inteligence",
-      description:
-        "Automatická detekce objektů, změn a rizik v infrastruktuře.",
-    },
-    {
-      icon: "📊",
-      title: "Přehledné reporty",
-      description:
-        "Okamžitý přehled výsledků, statistik a export do PDF.",
-    },
-  ];
+  const { t } = useLanguage();
+
+  const features = t.features.items;
 
   return (
     <section className="bg-slate-900 py-24 px-8">
       <div className="mx-auto max-w-7xl">
         <h2 className="mb-4 text-center text-5xl font-bold text-white">
-          Co AEGRIS nabízí
+          {t.features.title}
         </h2>
 
         <p className="mx-auto mb-16 max-w-2xl text-center text-slate-400">
-          Jedna platforma pro sběr dat, analýzu a správu infrastruktury.
+          {t.features.subtitle}
         </p>
 
         <div className="grid gap-8 md:grid-cols-3">

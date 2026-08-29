@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { Upload, FileText, CheckCircle } from "lucide-react";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function AIDemo() {
+  const { t } = useLanguage();
+
   const [analyzing, setAnalyzing] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -23,15 +26,15 @@ export default function AIDemo() {
 
         <div className="text-center mb-14">
           <p className="text-cyan-400 uppercase tracking-[0.4em]">
-            AI DEMO
+            {t.aiDemo.eyebrow}
           </p>
 
           <h2 className="text-5xl font-black text-white mt-4">
-            Infrastructure Damage Detection
+            {t.aiDemo.title}
           </h2>
 
           <p className="text-slate-400 mt-6">
-            Upload a satellite image and let AEGRIS AI analyze it.
+            {t.aiDemo.subtitle}
           </p>
         </div>
 
@@ -45,18 +48,18 @@ export default function AIDemo() {
             />
 
             <h3 className="text-white text-xl font-bold">
-              Upload Satellite Image
+              {t.aiDemo.uploadTitle}
             </h3>
 
             <p className="text-slate-400 mt-3">
-              JPG, PNG or TIFF
+              {t.aiDemo.fileTypes}
             </p>
 
             <button
               onClick={runAnalysis}
               className="mt-8 rounded-xl bg-cyan-500 px-8 py-4 font-bold text-slate-950 hover:bg-cyan-400 transition"
             >
-              Analyze Image
+              {t.aiDemo.analyzeButton}
             </button>
 
           </div>
@@ -65,7 +68,7 @@ export default function AIDemo() {
             <div className="mt-10">
 
               <p className="text-cyan-400 mb-4">
-                Running AI analysis...
+                {t.aiDemo.analyzing}
               </p>
 
               <div className="h-3 rounded-full bg-slate-800 overflow-hidden">
@@ -88,7 +91,7 @@ export default function AIDemo() {
                 />
 
                 <h3 className="text-2xl text-white font-bold">
-                  Analysis Complete
+                  {t.aiDemo.complete}
                 </h3>
 
               </div>
@@ -96,30 +99,38 @@ export default function AIDemo() {
               <div className="grid md:grid-cols-2 gap-6 mt-8">
 
                 <div className="rounded-xl bg-slate-900 p-5">
-                  <p className="text-slate-400">Detected Damage</p>
+                  <p className="text-slate-400">
+                    {t.aiDemo.detectedDamage}
+                  </p>
                   <p className="text-red-400 text-xl font-bold">
-                    Structural Crack
+                    {t.aiDemo.structuralCrack}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-slate-900 p-5">
-                  <p className="text-slate-400">Confidence</p>
+                  <p className="text-slate-400">
+                    {t.aiDemo.confidence}
+                  </p>
                   <p className="text-cyan-400 text-xl font-bold">
                     98.7%
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-slate-900 p-5">
-                  <p className="text-slate-400">Priority</p>
+                  <p className="text-slate-400">
+                    {t.aiDemo.priority}
+                  </p>
                   <p className="text-yellow-400 text-xl font-bold">
-                    HIGH
+                    {t.aiDemo.high}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-slate-900 p-5">
-                  <p className="text-slate-400">Recommendation</p>
+                  <p className="text-slate-400">
+                    {t.aiDemo.recommendation}
+                  </p>
                   <p className="text-white font-semibold">
-                    Repair within 30 days
+                    {t.aiDemo.repairWithin30Days}
                   </p>
                 </div>
 
@@ -127,7 +138,7 @@ export default function AIDemo() {
 
               <button className="mt-8 flex items-center gap-2 rounded-xl bg-cyan-500 px-6 py-4 font-bold text-slate-950">
                 <FileText size={20} />
-                Download PDF Report
+                {t.aiDemo.downloadReport}
               </button>
 
             </div>
