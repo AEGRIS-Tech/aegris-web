@@ -274,7 +274,7 @@ export default async function AdminProjectsPage() {
 
                     <td className="px-5 py-4 text-right">
                       <Link
-                        href={`/projects/${project.id}`}
+                        href={`/admin/projects/${project.id}`}
                         className="text-sm font-medium text-cyan-300 transition hover:text-cyan-200"
                       >
                         Otevřít →

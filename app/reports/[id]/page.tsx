@@ -93,6 +93,7 @@ export default function ProjectReportPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const projectId = Number(params.id);
 
@@ -101,7 +102,10 @@ export default function ProjectReportPage() {
 
     async function loadReport() {
       if (!Number.isInteger(projectId) || projectId <= 0) {
-        setErrorMessage("Neplatné ID projektu.");
+        setAccessDenied(true);
+        setErrorMessage(
+          "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."
+        );
         setLoading(false);
         return;
       }
@@ -114,8 +118,7 @@ export default function ProjectReportPage() {
       if (!active) return;
 
       if (userError || !user) {
-        setErrorMessage("Uživatel není přihlášen.");
-        setLoading(false);
+        router.push("/login");
         return;
       }
 
@@ -131,8 +134,17 @@ export default function ProjectReportPage() {
       if (!active) return;
 
       if (projectError || !projectData) {
-        console.error("CHYBA NAČTENÍ PROJEKTU PRO REPORT:", projectError);
-        setErrorMessage("Projekt nebyl nalezen.");
+        if (projectError) {
+          console.error(
+            "CHYBA NAČTENÍ PROJEKTU PRO REPORT:",
+            projectError
+          );
+        }
+
+        setAccessDenied(true);
+        setErrorMessage(
+          "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."
+        );
         setLoading(false);
         return;
       }
@@ -205,7 +217,7 @@ export default function ProjectReportPage() {
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, router]);
 
   const latestHistory = useMemo(
     () => history.slice(-8),
@@ -216,6 +228,38 @@ export default function ProjectReportPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#030817] text-slate-400">
         Načítám report...
+      </main>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#030817] px-4 text-white">
+        <div className="w-full max-w-[540px] rounded-2xl border border-red-500/20 bg-[#071225] p-8 text-center shadow-2xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-2xl font-black text-red-400">
+            !
+          </div>
+
+          <div className="mt-5 text-[10px] font-black uppercase tracking-[0.25em] text-red-400">
+            Přístup zamítnut
+          </div>
+
+          <h1 className="mt-3 text-xl font-black text-white">
+            K tomuto projektu nemáte přístup
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => router.push("/reports")}
+            className="mt-6 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 transition hover:bg-cyan-400"
+          >
+            Zpět na reporty
+          </button>
+        </div>
       </main>
     );
   }

@@ -1293,23 +1293,36 @@ const {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#030817] px-4 text-white">
         {projectLoadError ? (
-          <div className="max-w-lg rounded-2xl border border-red-500/20 bg-red-500/[0.03] p-6 text-center">
-            <div className="font-black text-red-400">
-              Projekt nelze otevřít
+          <div className="w-full max-w-xl rounded-2xl border border-red-500/20 bg-[#071225]/95 p-8 text-center shadow-2xl shadow-black/30">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-500/25 bg-red-500/10 text-2xl text-red-400">
+              !
             </div>
-            <div className="mt-2 text-sm text-slate-400">
-              {projectLoadError}
+
+            <div className="mt-5 text-[10px] font-black uppercase tracking-[0.22em] text-red-400">
+              Přístup zamítnut
             </div>
+
+            <h1 className="mt-2 text-xl font-black text-slate-100">
+              K tomuto projektu nemáte přístup
+            </h1>
+
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-400">
+              Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení.
+            </p>
+
             <button
               type="button"
-              onClick={() => router.push("/projects")}
-              className="mt-5 rounded-lg border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200"
+              onClick={() => router.replace("/projects")}
+              className="mt-6 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 transition hover:bg-cyan-400"
             >
               Zpět na projekty
             </button>
           </div>
         ) : (
-          <div className="text-slate-400">Načítám projekt...</div>
+          <div className="flex flex-col items-center gap-3 text-slate-400">
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+            <div className="text-sm">Načítám projekt...</div>
+          </div>
         )}
       </main>
     );

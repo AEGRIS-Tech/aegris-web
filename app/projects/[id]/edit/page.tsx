@@ -205,6 +205,9 @@ export default function EditProjectPage() {
   const [message, setMessage] =
     useState("");
 
+  const [projectLoadError, setProjectLoadError] =
+    useState("");
+
   useEffect(() => {
     maplibregl.setWorkerUrl(
       "/maplibre/maplibre-gl-worker.mjs"
@@ -226,6 +229,17 @@ export default function EditProjectPage() {
       const projectId =
         Number(params.id);
 
+      if (!Number.isFinite(projectId)) {
+        setProject(null);
+        setProjectLoadError(
+          "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."
+        );
+        setLoading(false);
+        return;
+      }
+
+      setProjectLoadError("");
+
       const { data, error } =
         await supabase
           .from("projects")
@@ -233,13 +247,26 @@ export default function EditProjectPage() {
           .eq("id", projectId)
           .maybeSingle();
 
-      if (error || !data) {
+      if (error) {
         console.error(
           "CHYBA NAČTENÍ PROJEKTU:",
           error
         );
 
-        router.push("/projects");
+        setProject(null);
+        setProjectLoadError(
+          "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!data) {
+        setProject(null);
+        setProjectLoadError(
+          "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."
+        );
+        setLoading(false);
         return;
       }
 
@@ -477,18 +504,43 @@ export default function EditProjectPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#020617] text-white">
-        <main className="mx-auto max-w-[900px] px-6 py-10">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-slate-500">
-            Načítám projekt...
-          </div>
-        </main>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-[#030817] px-4 text-white">
+        <div className="text-slate-400">Načítám projekt...</div>
+      </main>
     );
   }
 
   if (!project) {
-    return null;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#030817] px-4 text-white">
+        <div className="w-full max-w-[540px] rounded-2xl border border-red-500/20 bg-[#071225] p-8 text-center shadow-2xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-2xl font-black text-red-400">
+            !
+          </div>
+
+          <div className="mt-5 text-[10px] font-black uppercase tracking-[0.25em] text-red-400">
+            Přístup zamítnut
+          </div>
+
+          <h1 className="mt-3 text-xl font-black text-white">
+            K tomuto projektu nemáte přístup
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            {projectLoadError ||
+              "Projekt neexistuje nebo nemáte oprávnění k jeho zobrazení."}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => router.push("/projects")}
+            className="mt-6 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 transition hover:bg-cyan-400"
+          >
+            Zpět na projekty
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
