@@ -78,10 +78,41 @@ export default function MapPage() {
 
       setUser(user);
 
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("profiles")
+        .select("active_organization_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "CHYBA NAČTENÍ AKTIVNÍ ORGANIZACE PRO MAPU:",
+          profileError
+        );
+        setProjects([]);
+        setLoading(false);
+        return;
+      }
+
+      const activeOrganizationId =
+        profile?.active_organization_id ?? null;
+
+      if (!activeOrganizationId) {
+        console.error(
+          "CHYBA: Uživatel nemá nastavenou aktivní organizaci."
+        );
+        setProjects([]);
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("projects")
         .select("id, name, latitude, longitude, status")
-        .eq("user_id", user.id)
+        .eq("organization_id", activeOrganizationId)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -198,13 +229,13 @@ export default function MapPage() {
               </h1>
 
               <p className="mt-2 text-slate-500">
-                Přehled lokalit vašich zemědělských projektů.
+                Přehled lokalit projektů aktivní organizace.
               </p>
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
               <div className="text-xs uppercase tracking-wider text-slate-600">
-                Vaše projekty
+                Projekty organizace
               </div>
 
               <div className="mt-1 text-2xl font-black text-cyan-400">
@@ -225,7 +256,7 @@ export default function MapPage() {
             <div className="text-5xl">🗺️</div>
 
             <h2 className="mt-4 text-xl font-bold">
-              Zatím nemáte žádný projekt
+              Aktivní organizace zatím nemá žádný projekt
             </h2>
 
             <p className="mt-2 text-sm text-slate-500">

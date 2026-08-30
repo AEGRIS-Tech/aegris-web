@@ -107,8 +107,6 @@ export async function GET(
       );
     }
 
-    const { user } = access;
-
     /*
      * =====================================================
      * PROJECT ID
@@ -139,12 +137,14 @@ export async function GET(
 
     /*
      * =====================================================
-     * PROJECT OWNERSHIP
+     * PROJECT ACCESS
      * =====================================================
      *
      * Souřadnice nikdy nepřebíráme přímo od klienta.
-     * Nejprve ověříme, že projekt patří přihlášenému
-     * uživateli, a teprve potom použijeme jeho souřadnice.
+     * Projekt načítáme přes přihlášeného Supabase klienta
+     * a organization-aware RLS rozhodne, zda k němu má
+     * uživatel přístup. Weather endpoint je read-only,
+     * takže je dostupný i roli viewer.
      */
 
     const {
@@ -156,7 +156,6 @@ export async function GET(
         "id, latitude, longitude"
       )
       .eq("id", projectId)
-      .eq("user_id", user.id)
       .maybeSingle();
 
     if (projectError) {

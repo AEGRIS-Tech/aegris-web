@@ -231,8 +231,7 @@ export default function EditProjectPage() {
           .from("projects")
           .select("*")
           .eq("id", projectId)
-          .eq("user_id", user.id)
-          .single();
+          .maybeSingle();
 
       if (error || !data) {
         console.error(
@@ -395,7 +394,7 @@ export default function EditProjectPage() {
           )
         : null;
 
-    const { error } =
+    const { data: updatedProject, error } =
       await supabase
         .from("projects")
         .update({
@@ -407,10 +406,8 @@ export default function EditProjectPage() {
           "id",
           project.id
         )
-        .eq(
-          "user_id",
-          user.id
-        );
+        .select("id")
+        .maybeSingle();
 
     if (error) {
       console.error(
@@ -422,6 +419,14 @@ export default function EditProjectPage() {
         "Projekt se nepodařilo uložit."
       );
 
+      setSaving(false);
+      return;
+    }
+
+    if (!updatedProject) {
+      setMessage(
+        "Nemáte oprávnění tento projekt upravit."
+      );
       setSaving(false);
       return;
     }

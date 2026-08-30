@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { requireAccountAccess } from "@/lib/auth/account-access";
@@ -89,8 +89,6 @@ export async function GET(request: Request) {
       );
     }
 
-    const { user } = access;
-
     /*
      * --------------------------------------------------
      * PROJECT ID
@@ -119,7 +117,10 @@ export async function GET(request: Request) {
 
     /*
      * --------------------------------------------------
-     * PROJECT OWNERSHIP
+     * PROJECT ACCESS
+     *
+     * Přístup k projektu hlídá organization-aware RLS
+     * nad tabulkou projects.
      * --------------------------------------------------
      */
 
@@ -130,7 +131,6 @@ export async function GET(request: Request) {
       .from("projects")
       .select("id")
       .eq("id", projectId)
-      .eq("user_id", user.id)
       .maybeSingle();
 
     if (projectError) {

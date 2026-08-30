@@ -314,18 +314,78 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * --------------------------------------------------
+     * PROJECT ACCESS
+     *
+     * První dotaz běží přes přihlášeného Supabase klienta,
+     * takže organization-aware RLS rozhodne, zda uživatel
+     * projekt vůbec smí vidět.
+     *
+     * Protože další část endpointu používá service role
+     * a provádí zápisy, nestačí pouze read přístup.
+     * Analýzu mohou spustit jen owner/admin/member.
+     * Viewer zůstává read-only.
+     * --------------------------------------------------
+     */
+
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id, latitude, longitude, boundary, user_id, crop_name, growth_stage")
+      .select(
+        "id, latitude, longitude, boundary, user_id, organization_id, crop_name, growth_stage"
+      )
       .eq("id", projectId)
-      .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (projectError || !project) {
-      console.error("CHYBA NAČTENÍ PROJEKTU:", projectError);
+    if (projectError) {
+      console.error("CHYBA OVĚŘENÍ PŘÍSTUPU K PROJEKTU:", projectError);
+      return NextResponse.json(
+        { error: "Nepodařilo se ověřit přístup k projektu." },
+        { status: 500 }
+      );
+    }
+
+    if (!project) {
       return NextResponse.json(
         { error: "Projekt nebyl nalezen nebo k němu nemáte přístup." },
         { status: 404 }
+      );
+    }
+
+    if (!project.organization_id) {
+      console.error("PROJECT WITHOUT ORGANIZATION:", projectId);
+      return NextResponse.json(
+        { error: "Projekt nemá nastavenou organizaci." },
+        { status: 500 }
+      );
+    }
+
+    const { data: membership, error: membershipError } = await supabase
+      .from("organization_members")
+      .select("role")
+      .eq("organization_id", project.organization_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (membershipError) {
+      console.error("CHYBA OVĚŘENÍ ROLE V ORGANIZACI:", membershipError);
+      return NextResponse.json(
+        { error: "Nepodařilo se ověřit oprávnění k analýze." },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !membership ||
+      !["owner", "admin", "member"].includes(membership.role)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "K provedení analýzy nemáte oprávnění. Viewer má pouze přístup pro čtení.",
+          code: "INSUFFICIENT_ORGANIZATION_ROLE",
+        },
+        { status: 403 }
       );
     }
 

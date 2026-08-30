@@ -67,6 +67,36 @@ export default function ReportsPage() {
       }
 
       const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("profiles")
+        .select("active_organization_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (profileError) {
+        console.error(
+          "CHYBA NAČTENÍ AKTIVNÍ ORGANIZACE PRO REPORTY:",
+          profileError
+        );
+        setErrorMessage("Nepodařilo se načíst aktivní organizaci.");
+        setLoading(false);
+        return;
+      }
+
+      const activeOrganizationId =
+        profile?.active_organization_id ?? null;
+
+      if (!activeOrganizationId) {
+        setErrorMessage("Není nastavena aktivní organizace.");
+        setLoading(false);
+        return;
+      }
+
+      const {
         data: projectData,
         error: projectError,
       } = await supabase
@@ -74,7 +104,7 @@ export default function ReportsPage() {
         .select(
           "id, name, status, crop_name, crop_variety, area_ha, created_at"
         )
-        .eq("user_id", user.id)
+        .eq("organization_id", activeOrganizationId)
         .order("created_at", { ascending: false });
 
       if (!active) return;
@@ -191,7 +221,7 @@ export default function ReportsPage() {
             </h1>
 
             <p className="mt-2 text-sm text-slate-500">
-              Přehled posledních analýz a exportovatelných reportů projektů.
+              Přehled posledních analýz a exportovatelných reportů aktivní organizace.
             </p>
           </div>
 

@@ -126,8 +126,7 @@ export default function ProjectReportPage() {
         .from("projects")
         .select("*")
         .eq("id", projectId)
-        .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!active) return;
 

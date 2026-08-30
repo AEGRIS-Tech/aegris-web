@@ -102,6 +102,49 @@ export async function GET() {
     const { user } = access;
 
     const {
+      data: profile,
+      error: profileError,
+    } = await authSupabase
+      .from("profiles")
+      .select("active_organization_id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "DASHBOARD ACTIVE ORGANIZATION ERROR:",
+        profileError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Nepodařilo se načíst aktivní organizaci.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const activeOrganizationId =
+      profile?.active_organization_id ?? null;
+
+    if (!activeOrganizationId) {
+      return NextResponse.json(
+        {
+          error:
+            "Uživatel nemá nastavenou aktivní organizaci.",
+          code: "ACTIVE_ORGANIZATION_REQUIRED",
+        },
+        { status: 409 }
+      );
+    }
+
+    /*
+     * Dashboard je vždy scoped na aktivní organizaci.
+     * Organization-aware RLS zároveň ověří, že přihlášený
+     * uživatel je členem této organizace.
+     */
+    const {
       data: projectsData,
       error: projectsError,
     } = await authSupabase
@@ -109,7 +152,7 @@ export async function GET() {
       .select(
         "id, name, latitude, longitude, status, created_at"
       )
-      .eq("user_id", user.id)
+      .eq("organization_id", activeOrganizationId)
       .order("created_at", { ascending: false });
 
     if (projectsError) {

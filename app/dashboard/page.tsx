@@ -75,6 +75,8 @@ export default function DashboardPage() {
       criticalProjects: 0,
     });
   const [user, setUser] = useState<User | null>(null);
+  const [activeOrganizationId, setActiveOrganizationId] =
+    useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -188,11 +190,11 @@ export default function DashboardPage() {
   // =========================================================
 
   const loadProjects = useCallback(
-    async (userId: string) => {
+    async (organizationId: string) => {
       const { data, error } = await supabase
         .from("projects")
         .select("*")
-        .eq("user_id", userId)
+        .eq("organization_id", organizationId)
         .order("created_at", {
           ascending: false,
         });
@@ -245,7 +247,7 @@ export default function DashboardPage() {
       const { data: profile, error: profileError } =
         await supabase
           .from("profiles")
-          .select("account_type, demo_expires_at")
+          .select("account_type, demo_expires_at, active_organization_id")
           .eq("id", user.id)
           .maybeSingle();
 
@@ -267,9 +269,18 @@ export default function DashboardPage() {
         return;
       }
 
+      if (!profile?.active_organization_id) {
+        console.error(
+          "CHYBA: Uživatel nemá nastavenou aktivní organizaci."
+        );
+        router.push("/login");
+        return;
+      }
+
+      setActiveOrganizationId(profile.active_organization_id);
       setUser(user);
 
-      await loadProjects(user.id);
+      await loadProjects(profile.active_organization_id);
     }
 
     init();
@@ -369,14 +380,20 @@ export default function DashboardPage() {
         status: editingProject.status.trim(),
       })
       .eq("id", editingProject.id)
-      .eq("user_id", user.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error(
         "CHYBA ÚPRAVY PROJEKTU:",
         error
+      );
+      return;
+    }
+
+    if (!data) {
+      console.error(
+        "CHYBA: Projekt nebyl upraven nebo k němu nemáte oprávnění."
       );
       return;
     }
@@ -994,7 +1011,7 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Přehled všech projektů uživatele.
+                  Přehled všech projektů aktivní organizace.
                 </p>
 
               </div>
@@ -1311,7 +1328,7 @@ export default function DashboardPage() {
           setModalOpen(false)
         }
         onSave={async (project) => {
-          if (!user) return;
+          if (!user || !activeOrganizationId) return;
 
           const { error } =
             await supabase
@@ -1324,6 +1341,7 @@ export default function DashboardPage() {
                   status: project.status,
                   boundary: project.boundary,
                   user_id: user.id,
+                  organization_id: activeOrganizationId,
                 },
               ]);
 
@@ -1335,7 +1353,7 @@ export default function DashboardPage() {
             return;
           }
 
-          await loadProjects(user.id);
+          await loadProjects(activeOrganizationId);
 
           setSelectedProject({
             ...project,

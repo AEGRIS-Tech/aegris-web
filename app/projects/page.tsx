@@ -85,6 +85,10 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [activeOrganizationId, setActiveOrganizationId] =
+    useState<string | null>(null);
+  const [organizationRole, setOrganizationRole] =
+    useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -99,18 +103,54 @@ export default function ProjectsPage() {
       }
 
       setUser(user);
-      await loadProjects(user.id);
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("active_organization_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("CHYBA NAČTENÍ AKTIVNÍ ORGANIZACE:", profileError);
+        setLoading(false);
+        return;
+      }
+
+      const organizationId = profile?.active_organization_id ?? null;
+
+      if (!organizationId) {
+        console.error("CHYBA: Uživatel nemá nastavenou aktivní organizaci.");
+        setLoading(false);
+        return;
+      }
+
+      const { data: membership, error: membershipError } = await supabase
+        .from("organization_members")
+        .select("role")
+        .eq("organization_id", organizationId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (membershipError || !membership) {
+        console.error("CHYBA NAČTENÍ ROLE V ORGANIZACI:", membershipError);
+        setLoading(false);
+        return;
+      }
+
+      setActiveOrganizationId(organizationId);
+      setOrganizationRole(membership.role);
+      await loadProjects(organizationId);
       setLoading(false);
     }
 
     init();
   }, [router]);
 
-  async function loadProjects(userId: string) {
+  async function loadProjects(organizationId: string) {
     const { data, error } = await supabase
       .from("projects")
       .select("*")
-      .eq("user_id", userId)
+      .eq("organization_id", organizationId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -128,19 +168,33 @@ export default function ProjectsPage() {
 
     if (!ok) return;
 
-    const { error } = await supabase
+    if (
+      organizationRole !== "owner" &&
+      organizationRole !== "admin"
+    ) {
+      console.error("CHYBA: Nedostatečné oprávnění ke smazání projektu.");
+      return;
+    }
+
+    const { data: deletedProject, error } = await supabase
       .from("projects")
       .delete()
       .eq("id", id)
-      .eq("user_id", user?.id);
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error("CHYBA MAZÁNÍ PROJEKTU:", error);
       return;
     }
 
-    if (user) {
-      await loadProjects(user.id);
+    if (!deletedProject) {
+      console.error("CHYBA: Projekt nebyl smazán nebo k němu není oprávnění.");
+      return;
+    }
+
+    if (activeOrganizationId) {
+      await loadProjects(activeOrganizationId);
     }
   }
 
@@ -285,16 +339,18 @@ export default function ProjectsPage() {
               </h1>
 
               <p className="mt-2 text-slate-500">
-                Správa všech vašich zemědělských projektů.
+                Správa všech zemědělských projektů aktivní organizace.
               </p>
             </div>
 
-            <Link
-              href="/dashboard?newProject=1"
-              className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950 transition hover:bg-cyan-400"
-            >
-              + Nový projekt
-            </Link>
+            {organizationRole !== "viewer" && (
+              <Link
+                href="/dashboard?newProject=1"
+                className="inline-flex items-center justify-center rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950 transition hover:bg-cyan-400"
+              >
+                + Nový projekt
+              </Link>
+            )}
           </div>
 
           {/* ================================================= */}
@@ -344,19 +400,21 @@ export default function ProjectsPage() {
               <div className="text-4xl">📁</div>
 
               <h2 className="mt-4 text-xl font-bold">
-                Zatím nemáte žádný projekt
+                Aktivní organizace zatím nemá žádný projekt
               </h2>
 
               <p className="mt-2 text-sm text-slate-500">
                 Vytvořte první projekt a začněte s monitoringem.
               </p>
 
-              <Link
-                href="/dashboard?newProject=1"
-                className="mt-6 inline-flex rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950"
-              >
-                + Vytvořit projekt
-              </Link>
+              {organizationRole !== "viewer" && (
+                <Link
+                  href="/dashboard?newProject=1"
+                  className="mt-6 inline-flex rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950"
+                >
+                  + Vytvořit projekt
+                </Link>
+              )}
             </div>
           ) : (
             <div className="space-y-5">
@@ -481,22 +539,27 @@ export default function ProjectsPage() {
                         Otevřít projekt
                       </Link>
 
-                      <Link
-                        href={`/projects/${project.id}/edit`}
-                        className="rounded-xl bg-yellow-500 px-5 py-2.5 font-bold text-slate-950 transition hover:bg-yellow-400"
-                      >
-                        Upravit
-                      </Link>
+                      {organizationRole !== "viewer" && (
+                        <Link
+                          href={`/projects/${project.id}/edit`}
+                          className="rounded-xl bg-yellow-500 px-5 py-2.5 font-bold text-slate-950 transition hover:bg-yellow-400"
+                        >
+                          Upravit
+                        </Link>
+                      )}
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          deleteProject(project.id)
-                        }
-                        className="rounded-xl bg-red-600 px-5 py-2.5 font-bold text-white transition hover:bg-red-500"
-                      >
-                        Smazat
-                      </button>
+                      {(organizationRole === "owner" ||
+                        organizationRole === "admin") && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            deleteProject(project.id)
+                          }
+                          className="rounded-xl bg-red-600 px-5 py-2.5 font-bold text-white transition hover:bg-red-500"
+                        >
+                          Smazat
+                        </button>
+                      )}
                     </div>
                   </div>
                 </article>
