@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -18,7 +18,7 @@ type AcceptResponse =
       message?: string;
     };
 
-export default function AcceptOrganizationInvitePage() {
+function AcceptOrganizationInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -51,12 +51,6 @@ export default function AcceptOrganizationInvitePage() {
           return;
         }
 
-        /*
-         * Uživatel musí být přihlášený.
-         *
-         * Po potvrzení registrace by auth callback měl
-         * vytvořit session ještě před vstupem na tuto stránku.
-         */
         const {
           data: { user },
           error: userError,
@@ -108,10 +102,6 @@ export default function AcceptOrganizationInvitePage() {
           return;
         }
 
-        /*
-         * Členství je vytvořené a organizace nastavená
-         * jako aktivní. Přesměrujeme uživatele do AEGRIS.
-         */
         router.replace("/dashboard");
         router.refresh();
       } catch (error) {
@@ -186,5 +176,35 @@ export default function AcceptOrganizationInvitePage() {
         </button>
       </div>
     </main>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+      <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl">
+        <div className="text-4xl font-bold text-cyan-400">
+          AEGRIS
+        </div>
+
+        <div className="mt-5 text-lg font-semibold">
+          Načítám pozvánku
+        </div>
+
+        <p className="mt-2 text-sm text-slate-400">
+          Připravuji bezpečné přijetí pozvánky...
+        </p>
+
+        <div className="mx-auto mt-6 h-8 w-8 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+      </div>
+    </main>
+  );
+}
+
+export default function AcceptOrganizationInvitePage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <AcceptOrganizationInviteContent />
+    </Suspense>
   );
 }
