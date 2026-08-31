@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+
 import { supabase } from "@/lib/supabase";
 import BackButton from "../components/BackButton";
 
@@ -15,11 +16,39 @@ type Preferences = {
   analysisAlerts: boolean;
 };
 
+type OrganizationRole =
+  | "owner"
+  | "admin"
+  | "member"
+  | "viewer";
+
 type OrganizationInfo = {
   id: string;
   name: string;
-  role: "owner" | "admin" | "member" | "viewer";
+  role: OrganizationRole;
 };
+
+type OrganizationMember = {
+  id: string;
+  userId: string;
+  email: string | null;
+  role: OrganizationRole;
+  createdAt: string;
+  isCurrentUser: boolean;
+};
+
+type MembersApiResponse =
+  | {
+      ok: true;
+      organizationId: string;
+      currentUserRole: OrganizationRole;
+      members: OrganizationMember[];
+    }
+  | {
+      ok: false;
+      code?: string;
+      message?: string;
+    };
 
 const DEFAULT_PREFERENCES: Preferences = {
   language: "Čeština",
@@ -28,14 +57,29 @@ const DEFAULT_PREFERENCES: Preferences = {
   analysisAlerts: true,
 };
 
-function normalizePreferences(value: Partial<Preferences>): Preferences {
+function normalizePreferences(
+  value: Record<string, unknown>
+): Preferences {
+  const rawLanguage = value.language;
+  const rawUnits = value.units;
+
   return {
-    language: value.language === "English" ? "English" : "Čeština",
-    units: value.units === "Imperiální" ? "Imperiální" : "Metrické",
+    language:
+      rawLanguage === "English"
+        ? "English"
+        : "Čeština",
+
+    units:
+      rawUnits === "Imperiální" ||
+      rawUnits === "ImperiĂˇlnĂ"
+        ? "Imperiální"
+        : "Metrické",
+
     criticalAlerts:
       typeof value.criticalAlerts === "boolean"
         ? value.criticalAlerts
         : true,
+
     analysisAlerts:
       typeof value.analysisAlerts === "boolean"
         ? value.analysisAlerts
@@ -43,7 +87,7 @@ function normalizePreferences(value: Partial<Preferences>): Preferences {
   };
 }
 
-function getRoleLabel(role: OrganizationInfo["role"]) {
+function getRoleLabel(role: OrganizationRole) {
   switch (role) {
     case "owner":
       return "Vlastník";
@@ -58,22 +102,77 @@ function getRoleLabel(role: OrganizationInfo["role"]) {
   }
 }
 
+function getRoleDescription(role: OrganizationRole) {
+  switch (role) {
+    case "owner":
+      return "Plná správa organizace";
+    case "admin":
+      return "Správa organizace a členů";
+    case "member":
+      return "Práce s projekty a daty";
+    case "viewer":
+      return "Přístup pouze pro čtení";
+    default:
+      return "";
+  }
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat("cs-CZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
 export default function SettingsPage() {
   const router = useRouter();
 
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(
+    null
+  );
+
+  const [loading, setLoading] =
+    useState(true);
 
   const [preferences, setPreferences] =
     useState<Preferences>(DEFAULT_PREFERENCES);
 
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] =
+    useState(false);
 
-  const [organization, setOrganization] =
-    useState<OrganizationInfo | null>(null);
+  const [
+    organization,
+    setOrganization,
+  ] = useState<OrganizationInfo | null>(
+    null
+  );
 
-  const [organizationError, setOrganizationError] =
-    useState<string | null>(null);
+  const [
+    organizationError,
+    setOrganizationError,
+  ] = useState<string | null>(null);
+
+  const [
+    members,
+    setMembers,
+  ] = useState<OrganizationMember[]>([]);
+
+  const [
+    membersLoading,
+    setMembersLoading,
+  ] = useState(false);
+
+  const [
+    membersError,
+    setMembersError,
+  ] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -83,34 +182,57 @@ export default function SettingsPage() {
         data: { user: currentUser },
       } = await supabase.auth.getUser();
 
-      if (!active) return;
+      if (!active) {
+        return;
+      }
 
       if (!currentUser) {
-        router.replace("/login?next=/settings");
+        router.replace(
+          "/login?next=/settings"
+        );
         return;
       }
 
       setUser(currentUser);
 
+      /*
+       * Lokální preference.
+       */
       try {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
+        const raw =
+          window.localStorage.getItem(
+            STORAGE_KEY
+          );
 
         if (raw) {
-          const parsed = JSON.parse(raw) as Partial<Preferences>;
+          const parsed = JSON.parse(
+            raw
+          ) as Record<string, unknown>;
 
-          setPreferences(normalizePreferences(parsed));
+          setPreferences(
+            normalizePreferences(parsed)
+          );
         }
       } catch (error) {
-        console.error("SETTINGS LOAD ERROR:", error);
+        console.error(
+          "SETTINGS LOAD ERROR:",
+          error
+        );
       }
 
+      /*
+       * Aktivní organizace a role
+       * přihlášeného uživatele.
+       */
       try {
         const {
           data: profile,
           error: profileError,
         } = await supabase
           .from("profiles")
-          .select("active_organization_id")
+          .select(
+            "active_organization_id"
+          )
           .eq("id", currentUser.id)
           .maybeSingle();
 
@@ -129,7 +251,9 @@ export default function SettingsPage() {
           return;
         }
 
-        if (!profile?.active_organization_id) {
+        if (
+          !profile?.active_organization_id
+        ) {
           if (active) {
             setOrganizationError(
               "Účet nemá nastavenou aktivní organizaci."
@@ -139,7 +263,8 @@ export default function SettingsPage() {
           return;
         }
 
-        const organizationId = profile.active_organization_id;
+        const organizationId =
+          profile.active_organization_id;
 
         const [
           organizationResult,
@@ -152,14 +277,24 @@ export default function SettingsPage() {
             .maybeSingle(),
 
           supabase
-            .from("organization_members")
+            .from(
+              "organization_members"
+            )
             .select("role")
-            .eq("organization_id", organizationId)
-            .eq("user_id", currentUser.id)
+            .eq(
+              "organization_id",
+              organizationId
+            )
+            .eq(
+              "user_id",
+              currentUser.id
+            )
             .maybeSingle(),
         ]);
 
-        if (organizationResult.error) {
+        if (
+          organizationResult.error
+        ) {
           console.error(
             "SETTINGS ORGANIZATION LOAD ERROR:",
             organizationResult.error
@@ -174,7 +309,9 @@ export default function SettingsPage() {
           return;
         }
 
-        if (membershipResult.error) {
+        if (
+          membershipResult.error
+        ) {
           console.error(
             "SETTINGS MEMBERSHIP LOAD ERROR:",
             membershipResult.error
@@ -204,13 +341,85 @@ export default function SettingsPage() {
 
         if (active) {
           setOrganization({
-            id: organizationResult.data.id,
-            name: organizationResult.data.name,
-            role: membershipResult.data
-              .role as OrganizationInfo["role"],
+            id:
+              organizationResult.data.id,
+            name:
+              organizationResult.data
+                .name,
+            role:
+              membershipResult.data
+                .role as OrganizationRole,
           });
 
-          setOrganizationError(null);
+          setOrganizationError(
+            null
+          );
+        }
+
+        /*
+         * Členové organizace se načítají
+         * přes zabezpečený serverový endpoint.
+         */
+        if (active) {
+          setMembersLoading(true);
+          setMembersError(null);
+        }
+
+        try {
+          const response = await fetch(
+            "/api/organizations/members",
+            {
+              method: "GET",
+              cache: "no-store",
+            }
+          );
+
+          const data =
+            (await response.json()) as MembersApiResponse;
+
+          if (
+            !response.ok ||
+            !data.ok
+          ) {
+            const message =
+              data.ok === false
+                ? data.message
+                : null;
+
+            throw new Error(
+              message ||
+                "Členy organizace se nepodařilo načíst."
+            );
+          }
+
+          if (active) {
+            setMembers(
+              data.members
+            );
+
+            setMembersError(
+              null
+            );
+          }
+        } catch (error) {
+          console.error(
+            "SETTINGS MEMBERS LOAD ERROR:",
+            error
+          );
+
+          if (active) {
+            setMembersError(
+              error instanceof Error
+                ? error.message
+                : "Členy organizace se nepodařilo načíst."
+            );
+          }
+        } finally {
+          if (active) {
+            setMembersLoading(
+              false
+            );
+          }
         }
       } catch (error) {
         console.error(
@@ -237,16 +446,20 @@ export default function SettingsPage() {
     };
   }, [router]);
 
-  function updatePreference<K extends keyof Preferences>(
+  function updatePreference<
+    K extends keyof Preferences,
+  >(
     key: K,
     value: Preferences[K]
   ) {
     setSaved(false);
 
-    setPreferences((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setPreferences(
+      (current) => ({
+        ...current,
+        [key]: value,
+      })
+    );
   }
 
   function savePreferences() {
@@ -273,6 +486,10 @@ export default function SettingsPage() {
     );
   }
 
+  const canManageMembers =
+    organization?.role === "owner" ||
+    organization?.role === "admin";
+
   return (
     <main className="min-h-screen bg-[#020617] text-white">
       <div className="mx-auto max-w-[1100px] px-6 py-7">
@@ -288,7 +505,8 @@ export default function SettingsPage() {
           </h1>
 
           <p className="mt-2 text-slate-500">
-            Nastavení účtu, organizace a preferencí aplikace.
+            Nastavení účtu, organizace
+            a preferencí aplikace.
           </p>
         </div>
 
@@ -325,8 +543,10 @@ export default function SettingsPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Organizace určuje projekty, data a oprávnění,
-                  se kterými aktuálně pracujete.
+                  Organizace určuje
+                  projekty, data a oprávnění,
+                  se kterými aktuálně
+                  pracujete.
                 </p>
               </div>
             </div>
@@ -339,7 +559,9 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="mt-2 text-lg font-bold">
-                    {organization.name}
+                    {
+                      organization.name
+                    }
                   </div>
                 </div>
 
@@ -350,7 +572,9 @@ export default function SettingsPage() {
 
                   <div className="mt-2">
                     <span className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-semibold text-cyan-300">
-                      {getRoleLabel(organization.role)}
+                      {getRoleLabel(
+                        organization.role
+                      )}
                     </span>
                   </div>
                 </div>
@@ -363,15 +587,131 @@ export default function SettingsPage() {
             )}
 
             {organization && (
-              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
-                <div className="font-semibold text-slate-300">
-                  Správa členů
+              <div className="mt-6">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold">
+                      Členové organizace
+                    </h3>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Uživatelé, kteří mají
+                      přístup k této organizaci.
+                    </p>
+                  </div>
+
+                  <div className="text-sm text-slate-500">
+                    {members.length === 1
+                      ? "1 člen"
+                      : `${members.length} členové`}
+                  </div>
                 </div>
 
-                <div className="mt-1 text-sm text-slate-500">
-                  Pozvánky uživatelů, změna rolí a správa členů
-                  budou dostupné v dalším kroku multi-user systému.
-                </div>
+                {membersLoading && (
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
+                    Načítám členy
+                    organizace...
+                  </div>
+                )}
+
+                {!membersLoading &&
+                  membersError && (
+                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
+                      {membersError}
+                    </div>
+                  )}
+
+                {!membersLoading &&
+                  !membersError &&
+                  members.length === 0 && (
+                    <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
+                      Organizace zatím
+                      nemá žádné členy.
+                    </div>
+                  )}
+
+                {!membersLoading &&
+                  !membersError &&
+                  members.length > 0 && (
+                    <div className="mt-4 space-y-3">
+                      {members.map(
+                        (member) => (
+                          <div
+                            key={
+                              member.id
+                            }
+                            className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-4"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="truncate font-semibold text-slate-100">
+                                  {member.email ??
+                                    "E-mail není dostupný"}
+                                </div>
+
+                                {member.isCurrentUser && (
+                                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+                                    Vy
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="mt-1 text-xs text-slate-500">
+                                Členem od{" "}
+                                {formatDate(
+                                  member.createdAt
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-semibold text-cyan-300">
+                                {getRoleLabel(
+                                  member.role
+                                )}
+                              </span>
+
+                              <div className="mt-1 text-xs text-slate-500">
+                                {getRoleDescription(
+                                  member.role
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                {canManageMembers ? (
+                  <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                    <div className="font-semibold text-cyan-200">
+                      Správa členů
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-400">
+                      Máte oprávnění
+                      spravovat členy této
+                      organizace. Pozvánky,
+                      změny rolí a odebrání
+                      členů přidáme v
+                      následujícím kroku.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
+                    <div className="font-semibold text-slate-300">
+                      Správa členů
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-500">
+                      Správu členů mohou
+                      provádět pouze vlastník
+                      nebo administrátor
+                      organizace.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -392,7 +732,9 @@ export default function SettingsPage() {
                 </span>
 
                 <select
-                  value={preferences.language}
+                  value={
+                    preferences.language
+                  }
                   onChange={(event) =>
                     updatePreference(
                       "language",
@@ -418,7 +760,9 @@ export default function SettingsPage() {
                 </span>
 
                 <select
-                  value={preferences.units}
+                  value={
+                    preferences.units
+                  }
                   onChange={(event) =>
                     updatePreference(
                       "units",
@@ -453,18 +797,21 @@ export default function SettingsPage() {
               <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
                 <div>
                   <div className="font-semibold">
-                    Kritický stav projektu
+                    Kritický stav
+                    projektu
                   </div>
 
                   <div className="mt-1 text-sm text-slate-500">
-                    Upozornit při výrazném zhoršení stavu
-                    projektu.
+                    Upozornit při výrazném
+                    zhoršení stavu projektu.
                   </div>
                 </div>
 
                 <input
                   type="checkbox"
-                  checked={preferences.criticalAlerts}
+                  checked={
+                    preferences.criticalAlerts
+                  }
                   onChange={(event) =>
                     updatePreference(
                       "criticalAlerts",
@@ -482,14 +829,16 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="mt-1 text-sm text-slate-500">
-                    Upozornit na nové výsledky AEGRIS
-                    analýzy.
+                    Upozornit na nové
+                    výsledky AEGRIS analýzy.
                   </div>
                 </div>
 
                 <input
                   type="checkbox"
-                  checked={preferences.analysisAlerts}
+                  checked={
+                    preferences.analysisAlerts
+                  }
                   onChange={(event) =>
                     updatePreference(
                       "analysisAlerts",
@@ -504,7 +853,9 @@ export default function SettingsPage() {
             <div className="mt-5 flex items-center gap-4">
               <button
                 type="button"
-                onClick={savePreferences}
+                onClick={
+                  savePreferences
+                }
                 className="rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950 hover:bg-cyan-400"
               >
                 Uložit preference
@@ -534,13 +885,16 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="mt-1 text-sm text-slate-500">
-                  Ukončit aktuální přihlášení.
+                  Ukončit aktuální
+                  přihlášení.
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => void signOut()}
+                onClick={() =>
+                  void signOut()
+                }
                 className="rounded-xl border border-red-500/40 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-500/10"
               >
                 Odhlásit se
