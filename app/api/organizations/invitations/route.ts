@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Resend } from "resend";
 
 import { requireAccountAccess } from "@/lib/auth/account-access";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -23,6 +24,18 @@ function normalizeEmail(value: string) {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function roleLabel(role: InvitationRole) {
+  switch (role) {
+    case "admin":
+      return "Administrátor";
+    case "viewer":
+      return "Pouze čtení";
+    case "member":
+    default:
+      return "Člen";
+  }
 }
 
 export async function POST(request: Request) {
@@ -158,8 +171,6 @@ export async function POST(request: Request) {
     /*
      * 3. Aktivní organizace se bere výhradně z profilu
      * přihlášeného uživatele.
-     *
-     * organization_id nikdy nepřijímáme od klienta.
      */
     const {
       data: profile,
@@ -207,10 +218,6 @@ export async function POST(request: Request) {
 
     /*
      * 4. Autorizační kontrola.
-     *
-     * Service role použijeme až poté, co máme identitu
-     * uživatele a organization_id ze serverově ověřeného
-     * profilu.
      */
     const {
       data: membership,
@@ -259,7 +266,29 @@ export async function POST(request: Request) {
     }
 
     /*
-     * 5. Zkontrolujeme existující čekající pozvánku.
+     * 5. Načteme organizaci pro e-mail pozvánky.
+     */
+    const {
+      data: organization,
+      error: organizationError,
+    } = await supabaseAdmin
+      .from("organizations")
+      .select("name")
+      .eq("id", organizationId)
+      .maybeSingle();
+
+    if (organizationError) {
+      console.error(
+        "ORGANIZATION INVITATION ORGANIZATION ERROR:",
+        organizationError
+      );
+    }
+
+    const organizationName =
+      organization?.name?.trim() || "organizace v AEGRIS";
+
+    /*
+     * 6. Zkontrolujeme existující čekající pozvánku.
      */
     const {
       data: pendingInvitation,
@@ -296,10 +325,6 @@ export async function POST(request: Request) {
         pendingInvitation.expires_at
       );
 
-      /*
-       * Pokud stará pending pozvánka už vypršela,
-       * označíme ji jako expired a dovolíme vytvořit novou.
-       */
       if (
         Number.isFinite(expiresAt) &&
         expiresAt <= Date.now()
@@ -348,10 +373,10 @@ export async function POST(request: Request) {
     }
 
     /*
-     * 6. Vytvoření pozvánky.
+     * 7. Vytvoření pozvánky.
      *
-     * E-mail zatím neposíláme. V tomto kroku pouze bezpečně
-     * založíme serverovou invitation entitu.
+     * Token načítáme pouze na serveru kvůli vytvoření odkazu.
+     * Klientovi ho neposíláme.
      */
     const {
       data: invitation,
@@ -365,15 +390,11 @@ export async function POST(request: Request) {
         invited_by: user.id,
       })
       .select(
-        "id, organization_id, email, role, status, created_at, expires_at"
+        "id, organization_id, email, role, token, status, created_at, expires_at"
       )
       .single();
 
     if (invitationError) {
-      /*
-       * Zachytíme i případný souběh dvou requestů.
-       * DB unique index je poslední autoritativní ochrana.
-       */
       if (invitationError.code === "23505") {
         return NextResponse.json(
           {
@@ -406,10 +427,152 @@ export async function POST(request: Request) {
       );
     }
 
+    /*
+     * 8. Odeslání e-mailu přes Resend.
+     */
+    let emailSent = false;
+
+    const resendApiKey = process.env.RESEND_API_KEY;
+
+    if (!resendApiKey) {
+      console.error(
+        "ORGANIZATION INVITATION EMAIL ERROR: RESEND_API_KEY is missing."
+      );
+    } else {
+      try {
+        const resend = new Resend(resendApiKey);
+
+        const siteUrl =
+          process.env.NEXT_PUBLIC_SITE_URL?.replace(
+            /\/+$/,
+            ""
+          ) || "https://www.aegris.cz";
+
+        const invitationUrl =
+          `${siteUrl}/register?invite=${encodeURIComponent(
+            invitation.token
+          )}`;
+
+        const senderName =
+          typeof user.email === "string"
+            ? user.email
+            : "člen týmu";
+
+        const { error: emailError } =
+          await resend.emails.send({
+            from: "AEGRIS <pozvanky@send.aegris.cz>",
+            to: email,
+            subject: `Pozvánka do ${organizationName} | AEGRIS`,
+            text: [
+              `Byli jste pozváni do organizace ${organizationName} v AEGRIS.`,
+              "",
+              `Role: ${roleLabel(role)}`,
+              `Pozval: ${senderName}`,
+              "",
+              "Pozvánku přijmete vytvořením nebo přihlášením ke svému účtu:",
+              invitationUrl,
+              "",
+              `Platnost pozvánky končí ${new Date(
+                invitation.expires_at
+              ).toLocaleString("cs-CZ")}.`,
+              "",
+              "Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.",
+              "",
+              "AEGRIS",
+            ].join("\n"),
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#111827;line-height:1.6">
+                <h1 style="font-size:24px;margin-bottom:16px">
+                  Pozvánka do AEGRIS
+                </h1>
+
+                <p>
+                  Byli jste pozváni do organizace
+                  <strong>${organizationName}</strong>
+                  v platformě AEGRIS.
+                </p>
+
+                <p>
+                  <strong>Role:</strong> ${roleLabel(role)}<br />
+                  <strong>Pozval:</strong> ${senderName}
+                </p>
+
+                <p style="margin:28px 0">
+                  <a
+                    href="${invitationUrl}"
+                    style="
+                      display:inline-block;
+                      background:#111827;
+                      color:#ffffff;
+                      text-decoration:none;
+                      padding:12px 20px;
+                      border-radius:8px;
+                      font-weight:600;
+                    "
+                  >
+                    Přijmout pozvánku
+                  </a>
+                </p>
+
+                <p>
+                  Pokud tlačítko nefunguje, otevřete tento odkaz:
+                </p>
+
+                <p style="word-break:break-all">
+                  ${invitationUrl}
+                </p>
+
+                <p style="color:#6b7280;font-size:14px;margin-top:28px">
+                  Platnost pozvánky končí
+                  ${new Date(
+                    invitation.expires_at
+                  ).toLocaleString("cs-CZ")}.
+                </p>
+
+                <p style="color:#6b7280;font-size:14px">
+                  Pokud jste tuto pozvánku neočekávali,
+                  můžete tento e-mail ignorovat.
+                </p>
+
+                <p style="margin-top:32px">
+                  AEGRIS
+                </p>
+              </div>
+            `,
+          });
+
+        if (emailError) {
+          console.error(
+            "ORGANIZATION INVITATION RESEND ERROR:",
+            emailError
+          );
+        } else {
+          emailSent = true;
+        }
+      } catch (emailError) {
+        console.error(
+          "ORGANIZATION INVITATION EMAIL ERROR:",
+          emailError
+        );
+      }
+    }
+
+    /*
+     * Token záměrně není součástí response.
+     */
+    const {
+      token: _token,
+      ...publicInvitation
+    } = invitation;
+
     return NextResponse.json(
       {
         ok: true,
-        invitation,
+        invitation: publicInvitation,
+        email_sent: emailSent,
+        message: emailSent
+          ? "Pozvánka byla vytvořena a odeslána e-mailem."
+          : "Pozvánka byla vytvořena, ale e-mail se nepodařilo odeslat.",
       },
       {
         status: 201,

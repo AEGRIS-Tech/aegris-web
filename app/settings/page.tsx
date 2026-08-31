@@ -22,6 +22,11 @@ type OrganizationRole =
   | "member"
   | "viewer";
 
+type InvitationRole =
+  | "admin"
+  | "member"
+  | "viewer";
+
 type OrganizationInfo = {
   id: string;
   name: string;
@@ -43,6 +48,27 @@ type MembersApiResponse =
       organizationId: string;
       currentUserRole: OrganizationRole;
       members: OrganizationMember[];
+    }
+  | {
+      ok: false;
+      code?: string;
+      message?: string;
+    };
+
+type InvitationApiResponse =
+  | {
+      ok: true;
+      invitation: {
+        id: string;
+        organization_id: string;
+        email: string;
+        role: InvitationRole;
+        status: string;
+        created_at: string;
+        expires_at: string;
+      };
+      email_sent: boolean;
+      message?: string;
     }
   | {
       ok: false;
@@ -87,31 +113,43 @@ function normalizePreferences(
   };
 }
 
-function getRoleLabel(role: OrganizationRole) {
+function getRoleLabel(
+  role: OrganizationRole
+) {
   switch (role) {
     case "owner":
       return "Vlastník";
+
     case "admin":
       return "Administrátor";
+
     case "member":
       return "Člen";
+
     case "viewer":
       return "Pouze čtení";
+
     default:
       return role;
   }
 }
 
-function getRoleDescription(role: OrganizationRole) {
+function getRoleDescription(
+  role: OrganizationRole
+) {
   switch (role) {
     case "owner":
       return "Plná správa organizace";
+
     case "admin":
       return "Správa organizace a členů";
+
     case "member":
       return "Práce s projekty a daty";
+
     case "viewer":
       return "Přístup pouze pro čtení";
+
     default:
       return "";
   }
@@ -124,28 +162,57 @@ function formatDate(value: string) {
     return "—";
   }
 
-  return new Intl.DateTimeFormat("cs-CZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    "cs-CZ",
+    {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }
+  ).format(date);
+}
+
+function getMemberCountLabel(
+  count: number
+) {
+  if (count === 1) {
+    return "1 člen";
+  }
+
+  if (
+    count >= 2 &&
+    count <= 4
+  ) {
+    return `${count} členové`;
+  }
+
+  return `${count} členů`;
 }
 
 export default function SettingsPage() {
   const router = useRouter();
 
-  const [user, setUser] = useState<User | null>(
-    null
+  const [
+    user,
+    setUser,
+  ] = useState<User | null>(null);
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    preferences,
+    setPreferences,
+  ] = useState<Preferences>(
+    DEFAULT_PREFERENCES
   );
 
-  const [loading, setLoading] =
-    useState(true);
-
-  const [preferences, setPreferences] =
-    useState<Preferences>(DEFAULT_PREFERENCES);
-
-  const [saved, setSaved] =
-    useState(false);
+  const [
+    saved,
+    setSaved,
+  ] = useState(false);
 
   const [
     organization,
@@ -157,12 +224,16 @@ export default function SettingsPage() {
   const [
     organizationError,
     setOrganizationError,
-  ] = useState<string | null>(null);
+  ] = useState<string | null>(
+    null
+  );
 
   const [
     members,
     setMembers,
-  ] = useState<OrganizationMember[]>([]);
+  ] = useState<
+    OrganizationMember[]
+  >([]);
 
   const [
     membersLoading,
@@ -172,15 +243,51 @@ export default function SettingsPage() {
   const [
     membersError,
     setMembersError,
-  ] = useState<string | null>(null);
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    inviteEmail,
+    setInviteEmail,
+  ] = useState("");
+
+  const [
+    inviteRole,
+    setInviteRole,
+  ] = useState<InvitationRole>(
+    "member"
+  );
+
+  const [
+    inviteLoading,
+    setInviteLoading,
+  ] = useState(false);
+
+  const [
+    inviteError,
+    setInviteError,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    inviteSuccess,
+    setInviteSuccess,
+  ] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     let active = true;
 
     async function initialize() {
       const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser();
+        data: {
+          user: currentUser,
+        },
+      } =
+        await supabase.auth.getUser();
 
       if (!active) {
         return;
@@ -190,6 +297,7 @@ export default function SettingsPage() {
         router.replace(
           "/login?next=/settings"
         );
+
         return;
       }
 
@@ -205,12 +313,18 @@ export default function SettingsPage() {
           );
 
         if (raw) {
-          const parsed = JSON.parse(
-            raw
-          ) as Record<string, unknown>;
+          const parsed =
+            JSON.parse(
+              raw
+            ) as Record<
+              string,
+              unknown
+            >;
 
           setPreferences(
-            normalizePreferences(parsed)
+            normalizePreferences(
+              parsed
+            )
           );
         }
       } catch (error) {
@@ -233,7 +347,10 @@ export default function SettingsPage() {
           .select(
             "active_organization_id"
           )
-          .eq("id", currentUser.id)
+          .eq(
+            "id",
+            currentUser.id
+          )
           .maybeSingle();
 
         if (profileError) {
@@ -269,28 +386,36 @@ export default function SettingsPage() {
         const [
           organizationResult,
           membershipResult,
-        ] = await Promise.all([
-          supabase
-            .from("organizations")
-            .select("id, name")
-            .eq("id", organizationId)
-            .maybeSingle(),
+        ] =
+          await Promise.all([
+            supabase
+              .from(
+                "organizations"
+              )
+              .select(
+                "id, name"
+              )
+              .eq(
+                "id",
+                organizationId
+              )
+              .maybeSingle(),
 
-          supabase
-            .from(
-              "organization_members"
-            )
-            .select("role")
-            .eq(
-              "organization_id",
-              organizationId
-            )
-            .eq(
-              "user_id",
-              currentUser.id
-            )
-            .maybeSingle(),
-        ]);
+            supabase
+              .from(
+                "organization_members"
+              )
+              .select("role")
+              .eq(
+                "organization_id",
+                organizationId
+              )
+              .eq(
+                "user_id",
+                currentUser.id
+              )
+              .maybeSingle(),
+          ]);
 
         if (
           organizationResult.error
@@ -342,12 +467,16 @@ export default function SettingsPage() {
         if (active) {
           setOrganization({
             id:
-              organizationResult.data.id,
+              organizationResult
+                .data.id,
+
             name:
-              organizationResult.data
-                .name,
+              organizationResult
+                .data.name,
+
             role:
-              membershipResult.data
+              membershipResult
+                .data
                 .role as OrganizationRole,
           });
 
@@ -361,18 +490,25 @@ export default function SettingsPage() {
          * přes zabezpečený serverový endpoint.
          */
         if (active) {
-          setMembersLoading(true);
-          setMembersError(null);
+          setMembersLoading(
+            true
+          );
+
+          setMembersError(
+            null
+          );
         }
 
         try {
-          const response = await fetch(
-            "/api/organizations/members",
-            {
-              method: "GET",
-              cache: "no-store",
-            }
-          );
+          const response =
+            await fetch(
+              "/api/organizations/members",
+              {
+                method: "GET",
+                cache:
+                  "no-store",
+              }
+            );
 
           const data =
             (await response.json()) as MembersApiResponse;
@@ -446,6 +582,84 @@ export default function SettingsPage() {
     };
   }, [router]);
 
+  async function submitInvitation() {
+    const email =
+      inviteEmail.trim();
+
+    if (!email) {
+      setInviteError(
+        "Zadejte e-mail uživatele."
+      );
+
+      setInviteSuccess(null);
+
+      return;
+    }
+
+    setInviteLoading(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+
+    try {
+      const response =
+        await fetch(
+          "/api/organizations/invitations",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              email,
+              role: inviteRole,
+            }),
+          }
+        );
+
+      const data =
+        (await response.json()) as InvitationApiResponse;
+
+      if (
+        !response.ok ||
+        !data.ok
+      ) {
+        const message =
+          data.ok === false
+            ? data.message
+            : null;
+
+        throw new Error(
+          message ||
+            "Pozvánku se nepodařilo vytvořit."
+        );
+      }
+
+      setInviteEmail("");
+
+      setInviteSuccess(
+        data.email_sent
+          ? `Pozvánka pro ${data.invitation.email} byla vytvořena a odeslána e-mailem.`
+          : `Pozvánka pro ${data.invitation.email} byla vytvořena, ale e-mail se nepodařilo odeslat.`
+      );
+    } catch (error) {
+      console.error(
+        "SETTINGS INVITATION ERROR:",
+        error
+      );
+
+      setInviteError(
+        error instanceof Error
+          ? error.message
+          : "Pozvánku se nepodařilo vytvořit."
+      );
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
   function updatePreference<
     K extends keyof Preferences,
   >(
@@ -465,7 +679,9 @@ export default function SettingsPage() {
   function savePreferences() {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify(preferences)
+      JSON.stringify(
+        preferences
+      )
     );
 
     setSaved(true);
@@ -487,8 +703,10 @@ export default function SettingsPage() {
   }
 
   const canManageMembers =
-    organization?.role === "owner" ||
-    organization?.role === "admin";
+    organization?.role ===
+      "owner" ||
+    organization?.role ===
+      "admin";
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
@@ -505,8 +723,9 @@ export default function SettingsPage() {
           </h1>
 
           <p className="mt-2 text-slate-500">
-            Nastavení účtu, organizace
-            a preferencí aplikace.
+            Nastavení účtu,
+            organizace a preferencí
+            aplikace.
           </p>
         </div>
 
@@ -526,7 +745,8 @@ export default function SettingsPage() {
               </div>
 
               <div className="mt-2 font-semibold">
-                {user?.email ?? "—"}
+                {user?.email ??
+                  "—"}
               </div>
             </div>
           </section>
@@ -544,9 +764,9 @@ export default function SettingsPage() {
 
                 <p className="mt-1 text-sm text-slate-500">
                   Organizace určuje
-                  projekty, data a oprávnění,
-                  se kterými aktuálně
-                  pracujete.
+                  projekty, data a
+                  oprávnění, se kterými
+                  aktuálně pracujete.
                 </p>
               </div>
             </div>
@@ -595,15 +815,16 @@ export default function SettingsPage() {
                     </h3>
 
                     <p className="mt-1 text-sm text-slate-500">
-                      Uživatelé, kteří mají
-                      přístup k této organizaci.
+                      Uživatelé, kteří
+                      mají přístup k této
+                      organizaci.
                     </p>
                   </div>
 
                   <div className="text-sm text-slate-500">
-                    {members.length === 1
-                      ? "1 člen"
-                      : `${members.length} členové`}
+                    {getMemberCountLabel(
+                      members.length
+                    )}
                   </div>
                 </div>
 
@@ -617,13 +838,16 @@ export default function SettingsPage() {
                 {!membersLoading &&
                   membersError && (
                     <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
-                      {membersError}
+                      {
+                        membersError
+                      }
                     </div>
                   )}
 
                 {!membersLoading &&
                   !membersError &&
-                  members.length === 0 && (
+                  members.length ===
+                    0 && (
                     <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
                       Organizace zatím
                       nemá žádné členy.
@@ -632,10 +856,13 @@ export default function SettingsPage() {
 
                 {!membersLoading &&
                   !membersError &&
-                  members.length > 0 && (
+                  members.length >
+                    0 && (
                     <div className="mt-4 space-y-3">
                       {members.map(
-                        (member) => (
+                        (
+                          member
+                        ) => (
                           <div
                             key={
                               member.id
@@ -690,12 +917,114 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="mt-1 text-sm text-slate-400">
-                      Máte oprávnění
-                      spravovat členy této
-                      organizace. Pozvánky,
-                      změny rolí a odebrání
-                      členů přidáme v
-                      následujícím kroku.
+                      Pozvěte dalšího
+                      uživatele do aktivní
+                      organizace.
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_auto]">
+                      <input
+                        type="email"
+                        value={
+                          inviteEmail
+                        }
+                        onChange={(
+                          event
+                        ) => {
+                          setInviteEmail(
+                            event
+                              .target
+                              .value
+                          );
+
+                          setInviteError(
+                            null
+                          );
+
+                          setInviteSuccess(
+                            null
+                          );
+                        }}
+                        placeholder="uzivatel@example.com"
+                        disabled={
+                          inviteLoading
+                        }
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+
+                      <select
+                        value={
+                          inviteRole
+                        }
+                        onChange={(
+                          event
+                        ) => {
+                          setInviteRole(
+                            event
+                              .target
+                              .value as InvitationRole
+                          );
+
+                          setInviteError(
+                            null
+                          );
+
+                          setInviteSuccess(
+                            null
+                          );
+                        }}
+                        disabled={
+                          inviteLoading
+                        }
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <option value="member">
+                          Člen
+                        </option>
+
+                        <option value="viewer">
+                          Pouze čtení
+                        </option>
+
+                        <option value="admin">
+                          Administrátor
+                        </option>
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void submitInvitation()
+                        }
+                        disabled={
+                          inviteLoading
+                        }
+                        className="rounded-xl bg-cyan-500 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {inviteLoading
+                          ? "Vytvářím..."
+                          : "Pozvat člena"}
+                      </button>
+                    </div>
+
+                    {inviteError && (
+                      <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">
+                        {
+                          inviteError
+                        }
+                      </div>
+                    )}
+
+                    {inviteSuccess && (
+                      <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">
+                        {
+                          inviteSuccess
+                        }
+                      </div>
+                    )}
+
+                    <div className="mt-3 text-xs text-slate-500">
+                      Pozvánka bude odeslána automaticky e-mailem.
                     </div>
                   </div>
                 ) : (
@@ -706,8 +1035,9 @@ export default function SettingsPage() {
 
                     <div className="mt-1 text-sm text-slate-500">
                       Správu členů mohou
-                      provádět pouze vlastník
-                      nebo administrátor
+                      provádět pouze
+                      vlastník nebo
+                      administrátor
                       organizace.
                     </div>
                   </div>
@@ -735,7 +1065,9 @@ export default function SettingsPage() {
                   value={
                     preferences.language
                   }
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     updatePreference(
                       "language",
                       event.target
@@ -763,7 +1095,9 @@ export default function SettingsPage() {
                   value={
                     preferences.units
                   }
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     updatePreference(
                       "units",
                       event.target
@@ -802,8 +1136,9 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="mt-1 text-sm text-slate-500">
-                    Upozornit při výrazném
-                    zhoršení stavu projektu.
+                    Upozornit při
+                    výrazném zhoršení
+                    stavu projektu.
                   </div>
                 </div>
 
@@ -812,10 +1147,13 @@ export default function SettingsPage() {
                   checked={
                     preferences.criticalAlerts
                   }
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     updatePreference(
                       "criticalAlerts",
-                      event.target.checked
+                      event.target
+                        .checked
                     )
                   }
                   className="h-5 w-5 accent-cyan-400"
@@ -830,7 +1168,8 @@ export default function SettingsPage() {
 
                   <div className="mt-1 text-sm text-slate-500">
                     Upozornit na nové
-                    výsledky AEGRIS analýzy.
+                    výsledky AEGRIS
+                    analýzy.
                   </div>
                 </div>
 
@@ -839,10 +1178,13 @@ export default function SettingsPage() {
                   checked={
                     preferences.analysisAlerts
                   }
-                  onChange={(event) =>
+                  onChange={(
+                    event
+                  ) =>
                     updatePreference(
                       "analysisAlerts",
-                      event.target.checked
+                      event.target
+                        .checked
                     )
                   }
                   className="h-5 w-5 accent-cyan-400"
@@ -908,7 +1250,8 @@ export default function SettingsPage() {
             </div>
 
             <div className="mt-1">
-              Agriculture Intelligence · MVP
+              Agriculture Intelligence ·
+              MVP
             </div>
           </div>
         </div>
