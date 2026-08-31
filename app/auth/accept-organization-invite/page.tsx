@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -22,43 +22,26 @@ function AcceptOrganizationInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initializedRef = useRef(false);
-
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    if (initializedRef.current) {
+    const token = searchParams.get("token")?.trim();
+
+    if (!token) {
+      setErrorMessage(
+        "Pozvánka není platná nebo chybí její token."
+      );
+      setLoading(false);
       return;
     }
 
-    initializedRef.current = true;
-
-    let active = true;
-
     async function acceptInvitation() {
       try {
-        const token = searchParams.get("token")?.trim();
-
-        if (!token) {
-          if (active) {
-            setErrorMessage(
-              "Pozvánka není platná nebo chybí její token."
-            );
-            setLoading(false);
-          }
-
-          return;
-        }
-
         const {
           data: { user },
           error: userError,
         } = await supabase.auth.getUser();
-
-        if (!active) {
-          return;
-        }
 
         if (userError || !user) {
           const loginUrl =
@@ -86,10 +69,6 @@ function AcceptOrganizationInviteContent() {
         const body =
           (await response.json()) as AcceptResponse;
 
-        if (!active) {
-          return;
-        }
-
         if (!response.ok || !body.ok) {
           const message =
             !body.ok && body.message
@@ -98,7 +77,6 @@ function AcceptOrganizationInviteContent() {
 
           setErrorMessage(message);
           setLoading(false);
-
           return;
         }
 
@@ -110,20 +88,14 @@ function AcceptOrganizationInviteContent() {
           error
         );
 
-        if (active) {
-          setErrorMessage(
-            "Při přijímání pozvánky došlo k neočekávané chybě."
-          );
-          setLoading(false);
-        }
+        setErrorMessage(
+          "Při přijímání pozvánky došlo k neočekávané chybě."
+        );
+        setLoading(false);
       }
     }
 
     void acceptInvitation();
-
-    return () => {
-      active = false;
-    };
   }, [router, searchParams]);
 
   if (loading) {
