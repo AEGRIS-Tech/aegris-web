@@ -76,6 +76,56 @@ type InvitationApiResponse =
       message?: string;
     };
 
+type PendingInvitation = {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: InvitationRole;
+  status: string;
+  created_at: string;
+  expires_at: string;
+};
+
+type InvitationsListApiResponse =
+  | {
+      ok: true;
+      organizationId: string;
+      currentUserRole: OrganizationRole;
+      invitations: PendingInvitation[];
+    }
+  | {
+      ok: false;
+      code?: string;
+      message?: string;
+    };
+
+type InvitationMutationApiResponse =
+  | {
+      ok: true;
+      invitation?: Partial<PendingInvitation> & {
+        id: string;
+      };
+      email_sent?: boolean;
+      message?: string;
+    }
+  | {
+      ok: false;
+      code?: string;
+      message?: string;
+    };
+
+type MemberMutationApiResponse =
+  | {
+      ok: true;
+      code?: string;
+      message?: string;
+    }
+  | {
+      ok: false;
+      code?: string;
+      message?: string;
+    };
+
 const DEFAULT_PREFERENCES: Preferences = {
   language: "Čeština",
   units: "Metrické",
@@ -274,6 +324,57 @@ export default function SettingsPage() {
   const [
     inviteSuccess,
     setInviteSuccess,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    pendingInvitations,
+    setPendingInvitations,
+  ] = useState<PendingInvitation[]>([]);
+
+  const [
+    invitationsLoading,
+    setInvitationsLoading,
+  ] = useState(false);
+
+  const [
+    invitationsError,
+    setInvitationsError,
+  ] = useState<string | null>(null);
+
+  const [
+    managingInvitationId,
+    setManagingInvitationId,
+  ] = useState<string | null>(null);
+
+  const [
+    invitationActionError,
+    setInvitationActionError,
+  ] = useState<string | null>(null);
+
+  const [
+    invitationActionSuccess,
+    setInvitationActionSuccess,
+  ] = useState<string | null>(null);
+
+  const [
+    managingMemberId,
+    setManagingMemberId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    memberActionError,
+    setMemberActionError,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    memberActionSuccess,
+    setMemberActionSuccess,
   ] = useState<string | null>(
     null
   );
@@ -557,6 +658,62 @@ export default function SettingsPage() {
             );
           }
         }
+
+        if (
+          active &&
+          (
+            membershipResult.data.role === "owner" ||
+            membershipResult.data.role === "admin"
+          )
+        ) {
+          setInvitationsLoading(true);
+          setInvitationsError(null);
+
+          try {
+            const response =
+              await fetch(
+                "/api/organizations/invitations",
+                {
+                  method: "GET",
+                  cache: "no-store",
+                }
+              );
+
+            const data =
+              (await response.json()) as InvitationsListApiResponse;
+
+            if (!response.ok || !data.ok) {
+              throw new Error(
+                data.ok === false
+                  ? data.message ||
+                      "Čekající pozvánky se nepodařilo načíst."
+                  : "Čekající pozvánky se nepodařilo načíst."
+              );
+            }
+
+            if (active) {
+              setPendingInvitations(data.invitations);
+              setInvitationsError(null);
+            }
+          } catch (error) {
+            console.error(
+              "SETTINGS INVITATIONS LOAD ERROR:",
+              error
+            );
+
+            if (active) {
+              setInvitationsError(
+                error instanceof Error
+                  ? error.message
+                  : "Čekající pozvánky se nepodařilo načíst."
+              );
+            }
+          } finally {
+            if (active) {
+              setInvitationsLoading(false);
+            }
+          }
+        }
       } catch (error) {
         console.error(
           "SETTINGS ORGANIZATION ERROR:",
@@ -581,6 +738,150 @@ export default function SettingsPage() {
       active = false;
     };
   }, [router]);
+
+  async function updateMemberRole(
+    member: OrganizationMember,
+    role: InvitationRole
+  ) {
+    if (member.role === role) {
+      return;
+    }
+
+    setManagingMemberId(member.id);
+    setMemberActionError(null);
+    setMemberActionSuccess(null);
+
+    try {
+      const response = await fetch(
+        "/api/organizations/members",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            membershipId: member.id,
+            role,
+          }),
+        }
+      );
+
+      const data =
+        (await response.json()) as MemberMutationApiResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.ok === false
+            ? data.message ||
+                "Roli člena se nepodařilo změnit."
+            : "Roli člena se nepodařilo změnit."
+        );
+      }
+
+      setMembers((current) =>
+        current.map((currentMember) =>
+          currentMember.id === member.id
+            ? {
+                ...currentMember,
+                role,
+              }
+            : currentMember
+        )
+      );
+
+      setMemberActionSuccess(
+        `Role uživatele ${
+          member.email ?? "bez e-mailu"
+        } byla změněna na ${getRoleLabel(role)}.`
+      );
+    } catch (error) {
+      console.error(
+        "SETTINGS MEMBER ROLE UPDATE ERROR:",
+        error
+      );
+
+      setMemberActionError(
+        error instanceof Error
+          ? error.message
+          : "Roli člena se nepodařilo změnit."
+      );
+    } finally {
+      setManagingMemberId(null);
+    }
+  }
+
+  async function removeMember(
+    member: OrganizationMember
+  ) {
+    const confirmed = window.confirm(
+      `Opravdu chcete odebrat uživatele ${
+        member.email ?? "bez e-mailu"
+      } z organizace?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setManagingMemberId(member.id);
+    setMemberActionError(null);
+    setMemberActionSuccess(null);
+
+    try {
+      const response = await fetch(
+        "/api/organizations/members",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            membershipId: member.id,
+          }),
+        }
+      );
+
+      const data =
+        (await response.json()) as MemberMutationApiResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.ok === false
+            ? data.message ||
+                "Člena se nepodařilo odebrat."
+            : "Člena se nepodařilo odebrat."
+        );
+      }
+
+      setMembers((current) =>
+        current.filter(
+          (currentMember) =>
+            currentMember.id !== member.id
+        )
+      );
+
+      setMemberActionSuccess(
+        `Uživatel ${
+          member.email ?? "bez e-mailu"
+        } byl z organizace odebrán.`
+      );
+    } catch (error) {
+      console.error(
+        "SETTINGS MEMBER REMOVE ERROR:",
+        error
+      );
+
+      setMemberActionError(
+        error instanceof Error
+          ? error.message
+          : "Člena se nepodařilo odebrat."
+      );
+    } finally {
+      setManagingMemberId(null);
+    }
+  }
 
   async function submitInvitation() {
     const email =
@@ -639,6 +940,16 @@ export default function SettingsPage() {
 
       setInviteEmail("");
 
+      setPendingInvitations(
+        (current) => [
+          data.invitation,
+          ...current.filter(
+            (invitation) =>
+              invitation.id !== data.invitation.id
+          ),
+        ]
+      );
+
       setInviteSuccess(
         data.email_sent
           ? `Pozvánka pro ${data.invitation.email} byla vytvořena a odeslána e-mailem.`
@@ -657,6 +968,143 @@ export default function SettingsPage() {
       );
     } finally {
       setInviteLoading(false);
+    }
+  }
+
+  async function resendInvitation(
+    invitation: PendingInvitation
+  ) {
+    setManagingInvitationId(invitation.id);
+    setInvitationActionError(null);
+    setInvitationActionSuccess(null);
+
+    try {
+      const response = await fetch(
+        "/api/organizations/invitations",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invitationId: invitation.id,
+          }),
+        }
+      );
+
+      const data =
+        (await response.json()) as InvitationMutationApiResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.ok === false
+            ? data.message ||
+                "Pozvánku se nepodařilo znovu odeslat."
+            : "Pozvánku se nepodařilo znovu odeslat."
+        );
+      }
+
+      if (data.invitation) {
+        setPendingInvitations(
+          (current) =>
+            current.map(
+              (currentInvitation) =>
+                currentInvitation.id === invitation.id
+                  ? {
+                      ...currentInvitation,
+                      ...data.invitation,
+                    }
+                  : currentInvitation
+            )
+        );
+      }
+
+      setInvitationActionSuccess(
+        data.message ||
+          `Pozvánka pro ${invitation.email} byla znovu odeslána.`
+      );
+    } catch (error) {
+      console.error(
+        "SETTINGS INVITATION RESEND ERROR:",
+        error
+      );
+
+      setInvitationActionError(
+        error instanceof Error
+          ? error.message
+          : "Pozvánku se nepodařilo znovu odeslat."
+      );
+    } finally {
+      setManagingInvitationId(null);
+    }
+  }
+
+  async function revokeInvitation(
+    invitation: PendingInvitation
+  ) {
+    const confirmed = window.confirm(
+      `Opravdu chcete zrušit pozvánku pro ${invitation.email}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setManagingInvitationId(invitation.id);
+    setInvitationActionError(null);
+    setInvitationActionSuccess(null);
+
+    try {
+      const response = await fetch(
+        "/api/organizations/invitations",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invitationId: invitation.id,
+          }),
+        }
+      );
+
+      const data =
+        (await response.json()) as InvitationMutationApiResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.ok === false
+            ? data.message ||
+                "Pozvánku se nepodařilo zrušit."
+            : "Pozvánku se nepodařilo zrušit."
+        );
+      }
+
+      setPendingInvitations(
+        (current) =>
+          current.filter(
+            (currentInvitation) =>
+              currentInvitation.id !== invitation.id
+          )
+      );
+
+      setInvitationActionSuccess(
+        data.message ||
+          `Pozvánka pro ${invitation.email} byla zrušena.`
+      );
+    } catch (error) {
+      console.error(
+        "SETTINGS INVITATION REVOKE ERROR:",
+        error
+      );
+
+      setInvitationActionError(
+        error instanceof Error
+          ? error.message
+          : "Pozvánku se nepodařilo zrušit."
+      );
+    } finally {
+      setManagingInvitationId(null);
     }
   }
 
@@ -891,24 +1339,111 @@ export default function SettingsPage() {
                               </div>
                             </div>
 
-                            <div className="text-right">
-                              <span className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-semibold text-cyan-300">
-                                {getRoleLabel(
-                                  member.role
-                                )}
-                              </span>
+                            <div className="flex min-w-[220px] flex-col items-end gap-2">
+                              {(() => {
+                                const canManageThisMember =
+                                  !member.isCurrentUser &&
+                                  (organization.role === "owner"
+                                    ? member.role !== "owner"
+                                    : organization.role === "admin" &&
+                                      (member.role === "member" ||
+                                        member.role === "viewer"));
 
-                              <div className="mt-1 text-xs text-slate-500">
-                                {getRoleDescription(
-                                  member.role
-                                )}
-                              </div>
+                                if (!canManageThisMember) {
+                                  return (
+                                    <div className="text-right">
+                                      <span className="inline-flex rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-semibold text-cyan-300">
+                                        {getRoleLabel(
+                                          member.role
+                                        )}
+                                      </span>
+
+                                      <div className="mt-1 text-xs text-slate-500">
+                                        {getRoleDescription(
+                                          member.role
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                const memberBusy =
+                                  managingMemberId ===
+                                  member.id;
+
+                                return (
+                                  <>
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                      <select
+                                        value={member.role}
+                                        onChange={(event) =>
+                                          void updateMemberRole(
+                                            member,
+                                            event.target
+                                              .value as InvitationRole
+                                          )
+                                        }
+                                        disabled={memberBusy}
+                                        className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        {organization.role ===
+                                          "owner" && (
+                                          <option value="admin">
+                                            Administrátor
+                                          </option>
+                                        )}
+
+                                        <option value="member">
+                                          Člen
+                                        </option>
+
+                                        <option value="viewer">
+                                          Pouze čtení
+                                        </option>
+                                      </select>
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          void removeMember(
+                                            member
+                                          )
+                                        }
+                                        disabled={memberBusy}
+                                        className="rounded-xl border border-red-500/40 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                      >
+                                        {memberBusy
+                                          ? "Pracuji..."
+                                          : "Odebrat"}
+                                      </button>
+                                    </div>
+
+                                    <div className="text-xs text-slate-500">
+                                      {getRoleDescription(
+                                        member.role
+                                      )}
+                                    </div>
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                         )
                       )}
                     </div>
                   )}
+
+                {memberActionError && (
+                  <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
+                    {memberActionError}
+                  </div>
+                )}
+
+                {memberActionSuccess && (
+                  <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-300">
+                    {memberActionSuccess}
+                  </div>
+                )}
 
                 {canManageMembers ? (
                   <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
@@ -986,9 +1521,12 @@ export default function SettingsPage() {
                           Pouze čtení
                         </option>
 
-                        <option value="admin">
-                          Administrátor
-                        </option>
+                        {organization.role ===
+                          "owner" && (
+                          <option value="admin">
+                            Administrátor
+                          </option>
+                        )}
                       </select>
 
                       <button
@@ -1025,6 +1563,137 @@ export default function SettingsPage() {
 
                     <div className="mt-3 text-xs text-slate-500">
                       Pozvánka bude odeslána automaticky e-mailem.
+                    </div>
+
+                    <div className="mt-6 border-t border-cyan-500/10 pt-5">
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-cyan-200">
+                            Čekající pozvánky
+                          </div>
+                          <div className="mt-1 text-sm text-slate-400">
+                            Aktivní pozvánky, které zatím nebyly přijaty.
+                          </div>
+                        </div>
+
+                        {!invitationsLoading &&
+                          !invitationsError && (
+                            <div className="text-xs text-slate-500">
+                              {pendingInvitations.length} čekajících
+                            </div>
+                          )}
+                      </div>
+
+                      {invitationsLoading && (
+                        <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-400">
+                          Načítám čekající pozvánky...
+                        </div>
+                      )}
+
+                      {!invitationsLoading &&
+                        invitationsError && (
+                          <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">
+                            {invitationsError}
+                          </div>
+                        )}
+
+                      {!invitationsLoading &&
+                        !invitationsError &&
+                        pendingInvitations.length === 0 && (
+                          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-400">
+                            Žádné čekající pozvánky.
+                          </div>
+                        )}
+
+                      {!invitationsLoading &&
+                        !invitationsError &&
+                        pendingInvitations.length > 0 && (
+                          <div className="mt-4 space-y-3">
+                            {pendingInvitations.map(
+                              (invitation) => {
+                                const invitationBusy =
+                                  managingInvitationId === invitation.id;
+
+                                const canManageInvitation =
+                                  organization.role === "owner" ||
+                                  invitation.role !== "admin";
+
+                                return (
+                                  <div
+                                    key={invitation.id}
+                                    className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate font-semibold text-slate-100">
+                                        {invitation.email}
+                                      </div>
+
+                                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                                        <span>
+                                          {getRoleLabel(invitation.role)}
+                                        </span>
+                                        <span>
+                                          Vytvořeno{" "}
+                                          {formatDate(invitation.created_at)}
+                                        </span>
+                                        <span>
+                                          Platí do{" "}
+                                          {formatDate(invitation.expires_at)}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {canManageInvitation ? (
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            void resendInvitation(invitation)
+                                          }
+                                          disabled={invitationBusy}
+                                          className="rounded-xl border border-cyan-500/40 px-3 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          {invitationBusy
+                                            ? "Pracuji..."
+                                            : "Odeslat znovu"}
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            void revokeInvitation(invitation)
+                                          }
+                                          disabled={invitationBusy}
+                                          className="rounded-xl border border-red-500/40 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                          {invitationBusy
+                                            ? "Pracuji..."
+                                            : "Zrušit"}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-400">
+                                        Chráněná pozvánka
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                            )}
+                          </div>
+                        )}
+
+                      {invitationActionError && (
+                        <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300">
+                          {invitationActionError}
+                        </div>
+                      )}
+
+                      {invitationActionSuccess && (
+                        <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">
+                          {invitationActionSuccess}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (

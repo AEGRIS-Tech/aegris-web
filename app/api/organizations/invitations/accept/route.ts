@@ -8,18 +8,99 @@ type AcceptInvitationBody = {
   token?: unknown;
 };
 
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
+type AcceptInvitationRpcResult =
+  | {
+      ok: true;
+      organization_id: string;
+      membership_id: string;
+      role: string;
+      already_member: boolean;
+      invitation_id: string;
+    }
+  | {
+      ok: false;
+      code: string;
+    };
+
+function getErrorResponse(code: string) {
+  switch (code) {
+    case "INVITATION_NOT_FOUND":
+      return NextResponse.json(
+        {
+          ok: false,
+          code,
+          message:
+            "Pozvánka neexistuje nebo není platná.",
+        },
+        {
+          status: 404,
+        }
+      );
+
+    case "INVITATION_NOT_PENDING":
+      return NextResponse.json(
+        {
+          ok: false,
+          code,
+          message:
+            "Tato pozvánka už není aktivní.",
+        },
+        {
+          status: 409,
+        }
+      );
+
+    case "INVITATION_EXPIRED":
+      return NextResponse.json(
+        {
+          ok: false,
+          code,
+          message:
+            "Platnost pozvánky vypršela.",
+        },
+        {
+          status: 410,
+        }
+      );
+
+    case "INVITATION_EMAIL_MISMATCH":
+      return NextResponse.json(
+        {
+          ok: false,
+          code,
+          message:
+            "Tato pozvánka je určena pro jiný uživatelský účet.",
+        },
+        {
+          status: 403,
+        }
+      );
+
+    default:
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "INVITATION_ACCEPT_FAILED",
+          message:
+            "Pozvánku se nepodařilo dokončit.",
+        },
+        {
+          status: 500,
+        }
+      );
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createServerSupabaseClient();
+    const supabase =
+      await createServerSupabaseClient();
 
     /*
-     * 1. Uživatel musí být přihlášený a mít platný AEGRIS účet.
+     * 1. Přihlášený uživatel + platný AEGRIS účet.
      */
-    const access = await requireAccountAccess(supabase);
+    const access =
+      await requireAccountAccess(supabase);
 
     if (!access.ok) {
       return NextResponse.json(
@@ -37,18 +118,20 @@ export async function POST(request: Request) {
     const user = access.user;
 
     /*
-     * 2. Načtení tokenu z request body.
+     * 2. Validace request body.
      */
     let body: AcceptInvitationBody;
 
     try {
-      body = (await request.json()) as AcceptInvitationBody;
+      body =
+        (await request.json()) as AcceptInvitationBody;
     } catch {
       return NextResponse.json(
         {
           ok: false,
           code: "INVALID_BODY",
-          message: "Neplatná data požadavku.",
+          message:
+            "Neplatná data požadavku.",
         },
         {
           status: 400,
@@ -61,7 +144,8 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: "TOKEN_REQUIRED",
-          message: "Chybí token pozvánky.",
+          message:
+            "Chybí token pozvánky.",
         },
         {
           status: 400,
@@ -76,7 +160,8 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: "TOKEN_INVALID",
-          message: "Token pozvánky není platný.",
+          message:
+            "Token pozvánky není platný.",
         },
         {
           status: 400,
@@ -85,307 +170,105 @@ export async function POST(request: Request) {
     }
 
     /*
-     * 3. Načtení pozvánky.
+     * UUID kontrolu necháváme databázi, ale zachytíme
+     * neplatný UUID vstup jako běžný neplatný token.
      */
-    const {
-      data: invitation,
-      error: invitationError,
-    } = await supabaseAdmin
-      .from("organization_invitations")
-      .select(
-        "id, organization_id, email, role, status, expires_at, accepted_at, accepted_by"
-      )
-      .eq("token", token)
-      .maybeSingle();
-
-    if (invitationError) {
-      console.error(
-        "ORGANIZATION INVITATION ACCEPT LOAD ERROR:",
-        invitationError
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "INVITATION_UNAVAILABLE",
-          message: "Pozvánku se nepodařilo ověřit.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    if (!invitation) {
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "INVITATION_NOT_FOUND",
-          message: "Pozvánka neexistuje nebo není platná.",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    /*
-     * 4. Stav pozvánky.
-     */
-    if (invitation.status !== "pending") {
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "INVITATION_NOT_PENDING",
-          message: "Tato pozvánka už není aktivní.",
-        },
-        {
-          status: 409,
-        }
-      );
-    }
-
-    /*
-     * 5. Expirace.
-     */
-    const expiresAt = Date.parse(invitation.expires_at);
-
     if (
-      !Number.isFinite(expiresAt) ||
-      expiresAt <= Date.now()
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        token
+      )
     ) {
-      const {
-        error: expireError,
-      } = await supabaseAdmin
-        .from("organization_invitations")
-        .update({
-          status: "expired",
-        })
-        .eq("id", invitation.id)
-        .eq("status", "pending");
-
-      if (expireError) {
-        console.error(
-          "ORGANIZATION INVITATION ACCEPT EXPIRE ERROR:",
-          expireError
-        );
-      }
-
       return NextResponse.json(
         {
           ok: false,
-          code: "INVITATION_EXPIRED",
-          message: "Platnost pozvánky vypršela.",
+          code: "TOKEN_INVALID",
+          message:
+            "Token pozvánky není platný.",
         },
         {
-          status: 410,
+          status: 400,
         }
       );
     }
 
-    /*
-     * 6. Pozvánku smí přijmout pouze účet se stejným
-     * e-mailem, na který byla vytvořena.
-     */
     if (
       typeof user.email !== "string" ||
-      normalizeEmail(user.email) !==
-        normalizeEmail(invitation.email)
+      user.email.trim().length === 0
     ) {
       return NextResponse.json(
         {
           ok: false,
-          code: "INVITATION_EMAIL_MISMATCH",
+          code: "USER_EMAIL_REQUIRED",
           message:
-            "Tato pozvánka je určena pro jiný uživatelský účet.",
+            "U uživatelského účtu chybí e-mailová adresa.",
         },
         {
-          status: 403,
+          status: 400,
         }
       );
     }
 
     /*
-     * 7. Zkontrolujeme, zda už členství neexistuje.
+     * 3. Celé přijetí invitation proběhne uvnitř
+     * jediné PostgreSQL transakce.
+     *
+     * RPC:
+     * - zamkne invitation,
+     * - ověří pending stav,
+     * - ověří expiraci,
+     * - ověří e-mail,
+     * - vytvoří / načte membership,
+     * - nastaví active_organization_id,
+     * - označí invitation jako accepted.
      */
     const {
-      data: existingMembership,
-      error: membershipCheckError,
-    } = await supabaseAdmin
-      .from("organization_members")
-      .select("id, role")
-      .eq(
-        "organization_id",
-        invitation.organization_id
-      )
-      .eq("user_id", user.id)
-      .maybeSingle();
+      data,
+      error,
+    } = await supabaseAdmin.rpc(
+      "accept_organization_invitation",
+      {
+        p_token: token,
+        p_user_id: user.id,
+        p_user_email: user.email,
+      }
+    );
 
-    if (membershipCheckError) {
+    if (error) {
       console.error(
-        "ORGANIZATION INVITATION ACCEPT MEMBERSHIP CHECK ERROR:",
-        membershipCheckError
+        "ORGANIZATION INVITATION ACCEPT RPC ERROR:",
+        error
       );
 
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "MEMBERSHIP_CHECK_FAILED",
-          message:
-            "Existující členství se nepodařilo ověřit.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    /*
-     * Pokud už členem je, nepřidáváme duplicitu.
-     * Pouze uzavřeme invitation jako accepted.
-     */
-    if (existingMembership) {
-      const {
-        error: invitationUpdateError,
-      } = await supabaseAdmin
-        .from("organization_invitations")
-        .update({
-          status: "accepted",
-          accepted_at: new Date().toISOString(),
-          accepted_by: user.id,
-        })
-        .eq("id", invitation.id)
-        .eq("status", "pending");
-
-      if (invitationUpdateError) {
-        console.error(
-          "ORGANIZATION INVITATION ACCEPT EXISTING MEMBER UPDATE ERROR:",
-          invitationUpdateError
-        );
-
-        return NextResponse.json(
-          {
-            ok: false,
-            code: "INVITATION_ACCEPT_FAILED",
-            message:
-              "Pozvánku se nepodařilo dokončit.",
-          },
-          {
-            status: 500,
-          }
-        );
-      }
-
       /*
-       * Aktivní organizaci nastavíme i v tomto případě.
-       */
-      const {
-        error: profileUpdateError,
-      } = await supabaseAdmin
-        .from("profiles")
-        .update({
-          active_organization_id:
-            invitation.organization_id,
-        })
-        .eq("id", user.id);
-
-      if (profileUpdateError) {
-        console.error(
-          "ORGANIZATION INVITATION ACCEPT PROFILE UPDATE ERROR:",
-          profileUpdateError
-        );
-
-        return NextResponse.json(
-          {
-            ok: false,
-            code: "ACTIVE_ORGANIZATION_UPDATE_FAILED",
-            message:
-              "Aktivní organizaci se nepodařilo nastavit.",
-          },
-          {
-            status: 500,
-          }
-        );
-      }
-
-      return NextResponse.json({
-        ok: true,
-        organizationId:
-          invitation.organization_id,
-        role: existingMembership.role,
-        alreadyMember: true,
-      });
-    }
-
-    /*
-     * 8. Vytvoření členství.
-     */
-    const {
-      data: membership,
-      error: membershipInsertError,
-    } = await supabaseAdmin
-      .from("organization_members")
-      .insert({
-        organization_id:
-          invitation.organization_id,
-        user_id: user.id,
-        role: invitation.role,
-      })
-      .select("id, role")
-      .single();
-
-    if (membershipInsertError) {
-      /*
-       * DB UNIQUE constraint je poslední ochrana
-       * proti souběžnému přijetí.
+       * RPC vyhazuje výjimku například tehdy,
+       * pokud neexistuje profil. V takovém případě
+       * PostgreSQL rollbackne celou transakci.
        */
       if (
-        membershipInsertError.code !== "23505"
+        typeof error.message === "string" &&
+        error.message.includes(
+          "PROFILE_NOT_FOUND"
+        )
       ) {
-        console.error(
-          "ORGANIZATION INVITATION ACCEPT MEMBERSHIP INSERT ERROR:",
-          membershipInsertError
-        );
-
         return NextResponse.json(
           {
             ok: false,
-            code: "MEMBERSHIP_CREATE_FAILED",
+            code: "PROFILE_NOT_FOUND",
             message:
-              "Členství v organizaci se nepodařilo vytvořit.",
+              "Uživatelský profil se nepodařilo najít.",
           },
           {
             status: 500,
           }
         );
       }
-    }
-
-    /*
-     * 9. Nastavení aktivní organizace.
-     */
-    const {
-      error: profileUpdateError,
-    } = await supabaseAdmin
-      .from("profiles")
-      .update({
-        active_organization_id:
-          invitation.organization_id,
-      })
-      .eq("id", user.id);
-
-    if (profileUpdateError) {
-      console.error(
-        "ORGANIZATION INVITATION ACCEPT PROFILE UPDATE ERROR:",
-        profileUpdateError
-      );
 
       return NextResponse.json(
         {
           ok: false,
-          code: "ACTIVE_ORGANIZATION_UPDATE_FAILED",
+          code: "INVITATION_ACCEPT_FAILED",
           message:
-            "Aktivní organizaci se nepodařilo nastavit.",
+            "Pozvánku se nepodařilo dokončit.",
         },
         {
           status: 500,
@@ -393,25 +276,12 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * 10. Označení invitation jako accepted.
-     */
-    const {
-      error: invitationUpdateError,
-    } = await supabaseAdmin
-      .from("organization_invitations")
-      .update({
-        status: "accepted",
-        accepted_at: new Date().toISOString(),
-        accepted_by: user.id,
-      })
-      .eq("id", invitation.id)
-      .eq("status", "pending");
+    const result =
+      data as AcceptInvitationRpcResult | null;
 
-    if (invitationUpdateError) {
+    if (!result) {
       console.error(
-        "ORGANIZATION INVITATION ACCEPT UPDATE ERROR:",
-        invitationUpdateError
+        "ORGANIZATION INVITATION ACCEPT RPC EMPTY RESULT"
       );
 
       return NextResponse.json(
@@ -427,15 +297,24 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!result.ok) {
+      return getErrorResponse(
+        result.code
+      );
+    }
+
+    /*
+     * 4. Zachováme veřejný response contract
+     * původního endpointu.
+     */
     return NextResponse.json(
       {
         ok: true,
         organizationId:
-          invitation.organization_id,
-        role:
-          membership?.role ??
-          invitation.role,
-        alreadyMember: false,
+          result.organization_id,
+        role: result.role,
+        alreadyMember:
+          result.already_member,
       },
       {
         status: 200,
