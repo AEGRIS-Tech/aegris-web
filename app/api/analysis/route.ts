@@ -22,6 +22,8 @@ const STATS_URL =
 
 const MIN_VALID_GEOMETRY_PCT = 60;
 const ANALYSIS_LOCK_STALE_SECONDS = 15 * 60;
+const AEGRIS_ENGINE_VERSION = "1.0.0";
+const AEGRIS_RULESET_VERSION = "2026-09-02.1";
 
 type BoundaryPoint = {
   latitude: number;
@@ -900,40 +902,6 @@ export async function POST(request: Request) {
       ndvi: item.ndvi,
     }));
 
-    /*
-     * NDVI HISTORY PERSISTENCE
-     *
-     * Nahrazení historie musí být atomické. RPC běží jako jeden
-     * PostgreSQL statement: pokud DELETE nebo INSERT selže, celá
-     * operace se rollbackne a původní historie zůstane zachována.
-     *
-     * Endpoint je fail-closed: bez bezpečně uložené historie
-     * nepokračujeme k persistence analysis/recommendation.
-     */
-    const { error: replaceHistoryError } = await serviceSupabase.rpc(
-      "replace_project_ndvi_history",
-      {
-        p_project_id: projectId,
-        p_rows: historyRows,
-      }
-    );
-
-    if (replaceHistoryError) {
-      console.error(
-        "NDVI HISTORY ATOMIC REPLACE ERROR:",
-        replaceHistoryError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "NDVI historii se nepodařilo bezpečně uložit. Analýza nebyla dokončena.",
-          code: "NDVI_HISTORY_PERSISTENCE_FAILED",
-        },
-        { status: 500 }
-      );
-    }
-
     const first = history[0];
     const latest = history[history.length - 1];
 
@@ -989,6 +957,7 @@ export async function POST(request: Request) {
     if (soilResult.error) console.error("ANALYSIS SOIL PROFILE ERROR:", soilResult.error);
 
     const cropProfile = (cropResult.data ?? null) as CropProfile | null;
+    const soilProfile = (soilResult.data ?? null) as ProjectSoilProfile | null;
     let cropStageProfile: CropStageProfile | null = null;
 
     if (cropProfile && growthStage) {
@@ -1026,7 +995,7 @@ export async function POST(request: Request) {
       weather,
       engineHistory,
       analysisCreatedAt,
-      (soilResult.data ?? null) as ProjectSoilProfile | null
+      soilProfile
     );
 
     const authoritativeRisk =
@@ -1034,62 +1003,127 @@ export async function POST(request: Request) {
       recommendation.priority === "Vysoká" ? "Vysoké" :
       recommendation.priority === "Střední" ? "Střední" : "Nízké";
 
-    const { data: savedAnalysis, error: analysisInsertError } = await serviceSupabase
-      .from("analysis")
-      .insert({
-        project_id: projectId,
-        ndvi: currentNdvi,
-        vegetation: Math.round(currentNdvi * 100),
-        risk: authoritativeRisk,
-        period_from: latest.from,
-        period_to: latest.to,
-        source_provider: "Copernicus Data Space Ecosystem",
+    /*
+     * Reproducibility evidence.
+     * Snapshot captures the exact server-side inputs supplied to the
+     * deterministic Decision Engine plus the satellite quality context.
+     */
+    const inputSnapshot = {
+      captured_at: analysisCreatedAt,
+      current_ndvi: currentNdvi,
+      crop_name: cropName || null,
+      growth_stage: growthStage || null,
+      crop_profile: cropProfile,
+      crop_stage_profile: cropStageProfile,
+      soil_profile: soilProfile,
+      weather,
+      ndvi_history: engineHistory,
+      satellite_quality: {
+        provider: "Copernicus Data Space Ecosystem",
         satellite: "Sentinel-2",
-        satellite_product: "Sentinel-2 L2A",
+        product: "Sentinel-2 L2A",
         spatial_resolution_m: 10,
         analysis_crs: `EPSG:${analysisEpsg}`,
         analysis_utm_zone: analysisUtmZone,
         geometry_pixel_count: geometryPixelCount,
-        valid_pixel_count: latest.validPixelCount,
-        valid_geometry_pct: latest.validGeometryPct,
         accepted_intervals: history.length,
         rejected_intervals: rejectedIntervals.length,
         quality_gate_pct: MIN_VALID_GEOMETRY_PCT,
-        median_ndvi: latest.medianNdvi,
-        p05_ndvi: latest.p05Ndvi,
-        p95_ndvi: latest.p95Ndvi,
-      })
-      .select()
-      .single();
+        latest_valid_pixel_count: latest.validPixelCount,
+        latest_valid_geometry_pct: latest.validGeometryPct,
+        latest_median_ndvi: latest.medianNdvi,
+        latest_p05_ndvi: latest.p05Ndvi,
+        latest_p95_ndvi: latest.p95Ndvi,
+      },
+    };
 
-    if (analysisInsertError || !savedAnalysis) {
-      console.error("ANALYSIS PERSISTENCE ERROR:", analysisInsertError);
-      return NextResponse.json({ error: "Analýzu se nepodařilo bezpečně uložit." }, { status: 500 });
+    /*
+     * Core persistence is one PostgreSQL transaction:
+     * NDVI history replacement + analysis + recommendation.
+     */
+    const { data: persistenceData, error: persistenceError } =
+      await serviceSupabase.rpc("persist_aegris_analysis_run", {
+        p_project_id: projectId,
+        p_history_rows: historyRows,
+        p_analysis: {
+          ndvi: currentNdvi,
+          vegetation: Math.round(currentNdvi * 100),
+          risk: authoritativeRisk,
+          created_at: analysisCreatedAt,
+          period_from: latest.from,
+          period_to: latest.to,
+          source_provider: "Copernicus Data Space Ecosystem",
+          satellite: "Sentinel-2",
+          satellite_product: "Sentinel-2 L2A",
+          spatial_resolution_m: 10,
+          analysis_crs: `EPSG:${analysisEpsg}`,
+          analysis_utm_zone: analysisUtmZone,
+          geometry_pixel_count: geometryPixelCount,
+          valid_pixel_count: latest.validPixelCount,
+          valid_geometry_pct: latest.validGeometryPct,
+          accepted_intervals: history.length,
+          rejected_intervals: rejectedIntervals.length,
+          quality_gate_pct: MIN_VALID_GEOMETRY_PCT,
+          median_ndvi: latest.medianNdvi,
+          p05_ndvi: latest.p05Ndvi,
+          p95_ndvi: latest.p95Ndvi,
+          engine_version: AEGRIS_ENGINE_VERSION,
+          ruleset_version: AEGRIS_RULESET_VERSION,
+          input_snapshot: inputSnapshot,
+          decision_snapshot: recommendation,
+          data_completeness_pct: recommendation.dataCompletenessPct,
+        },
+        p_recommendation: {
+          crop_name: cropName || null,
+          growth_stage: growthStage || null,
+          ndvi: currentNdvi,
+          level: recommendation.level,
+          priority: recommendation.priority,
+          score: recommendation.score,
+          summary: recommendation.summary,
+          recommendation: recommendation.recommendation,
+          actions: recommendation.actions,
+          weather_snapshot: weather,
+        },
+      });
+
+    if (persistenceError || !persistenceData) {
+      console.error("ANALYSIS RUN PERSISTENCE ERROR:", persistenceError);
+      return NextResponse.json(
+        {
+          error: "Analýzu a výsledek AEGRIS se nepodařilo bezpečně uložit.",
+          code: "ANALYSIS_RUN_PERSISTENCE_FAILED",
+        },
+        { status: 500 }
+      );
     }
 
-    const { data: savedRecommendation, error: recommendationError } = await serviceSupabase
-      .from("aegris_recommendations")
-      .upsert({
-        project_id: projectId,
-        analysis_id: savedAnalysis.id,
-        crop_name: cropName || null,
-        growth_stage: growthStage || null,
-        ndvi: currentNdvi,
-        level: recommendation.level,
-        priority: recommendation.priority,
-        score: recommendation.score,
-        summary: recommendation.summary,
-        recommendation: recommendation.recommendation,
-        actions: recommendation.actions,
-        weather_snapshot: weather,
-      }, { onConflict: "analysis_id" })
-      .select()
-      .single();
+    const persisted = persistenceData as {
+      analysis?: { id?: number; [key: string]: unknown };
+      recommendation?: { id?: number; [key: string]: unknown };
+    };
 
-    if (recommendationError || !savedRecommendation) {
-      console.error("RECOMMENDATION PERSISTENCE ERROR:", recommendationError);
-      return NextResponse.json({ error: "Výsledek AEGRIS se nepodařilo bezpečně uložit." }, { status: 500 });
+    const savedAnalysis = persisted.analysis;
+    const savedRecommendation = persisted.recommendation;
+
+    if (
+      !savedAnalysis ||
+      !Number.isInteger(savedAnalysis.id) ||
+      !savedRecommendation ||
+      !Number.isInteger(savedRecommendation.id)
+    ) {
+      console.error("ANALYSIS RUN PERSISTENCE INVALID RESPONSE:", persistenceData);
+      return NextResponse.json(
+        {
+          error: "Databáze vrátila neplatný výsledek uložené analýzy.",
+          code: "ANALYSIS_RUN_INVALID_RESPONSE",
+        },
+        { status: 500 }
+      );
     }
+
+    const savedAnalysisId = savedAnalysis.id as number;
+    const savedRecommendationId = savedRecommendation.id as number;
 
     const alertLevel = recommendation.level === "Kritické" ? "critical" : recommendation.level === "Upozornění" ? "warning" : "info";
     const alertTitle = recommendation.level === "Kritické" ? "Kritický stav projektu" : recommendation.level === "Upozornění" ? "AEGRIS upozornění" : "AEGRIS informační stav";
@@ -1119,8 +1153,8 @@ export async function POST(request: Request) {
 
     if (existingAlert?.id) {
       const { error: alertUpdateError } = await serviceSupabase.from("aegris_alerts").update({
-        analysis_id: savedAnalysis.id,
-        recommendation_id: savedRecommendation.id,
+        analysis_id: savedAnalysisId,
+        recommendation_id: savedRecommendationId,
         priority: recommendation.priority,
         message: alertMessage,
         is_read: false,
@@ -1133,8 +1167,8 @@ export async function POST(request: Request) {
     } else {
       const { error: alertInsertError } = await serviceSupabase.from("aegris_alerts").insert({
         project_id: projectId,
-        analysis_id: savedAnalysis.id,
-        recommendation_id: savedRecommendation.id,
+        analysis_id: savedAnalysisId,
+        recommendation_id: savedRecommendationId,
         level: alertLevel,
         priority: recommendation.priority,
         title: alertTitle,
