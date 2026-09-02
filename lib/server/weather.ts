@@ -115,9 +115,7 @@ export async function fetchProjectWeather(
   const response = await fetch(
     url.toString(),
     {
-      next: {
-        revalidate: 900,
-      },
+      cache: "no-store",
     }
   );
 
