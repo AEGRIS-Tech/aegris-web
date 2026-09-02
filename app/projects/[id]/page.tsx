@@ -756,10 +756,23 @@ setAreaError("");
   }
 
   async function markAlertAsRead(alertId: number) {
-    const { error } = await supabase
-      .from("aegris_alerts")
-      .update({ is_read: true })
-      .eq("id", alertId);
+    const { data, error } = await supabase.rpc(
+      "mark_aegris_alert_read",
+      {
+       p_alert_id: alertId,
+      }
+    );
+
+    if (!error && data !== true) {
+      console.error(
+        "AEGRIS ALERT MARK READ DENIED:",
+        {
+          alertId,
+          result: data,
+        }
+      );
+      return;
+    }
 
     if (error) {
       console.error("CHYBA OZNAČENÍ ALERTU:", error);
