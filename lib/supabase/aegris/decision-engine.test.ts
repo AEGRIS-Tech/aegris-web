@@ -1200,3 +1200,115 @@ describe("AEGRIS Decision Engine - soil moisture fallback regression", () => {
     );
   });
 });
+describe("AEGRIS Decision Engine - weather freshness gate", () => {
+  it("fresh weather remains available", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "2026-08-19T11:30:00.000Z",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBe(100);
+
+    expect(
+      result.scoreBreakdown.map((item) => item.label)
+    ).toEqual([
+      "NDVI",
+      "Trend NDVI",
+      "Vodní bilance",
+      "Teplota",
+      "Teplotní výhled 24 h",
+      "Vlhkost půdy",
+    ]);
+  });
+
+  it("weather exactly 60 minutes old remains available", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "2026-08-19T11:00:00.000Z",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBe(100);
+  });
+
+  it("weather older than 60 minutes is excluded", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "2026-08-19T10:59:59.999Z",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBeLessThan(100);
+
+    expect(
+      result.scoreBreakdown.some(
+        (item) =>
+          item.label === "Vodní bilance" ||
+          item.label === "Teplota" ||
+          item.label === "Teplotní výhled 24 h" ||
+          item.label === "Vlhkost půdy"
+      )
+    ).toBe(false);
+  });
+
+  it("invalid weather timestamp is excluded", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "not-a-date",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBeLessThan(100);
+
+    expect(
+      result.scoreBreakdown.some(
+        (item) =>
+          item.label === "Teplota"
+      )
+    ).toBe(false);
+  });
+
+  it("weather up to 5 minutes in the future is tolerated", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "2026-08-19T12:05:00.000Z",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBe(100);
+  });
+
+  it("weather more than 5 minutes in the future is excluded", () => {
+    const result = evaluate({
+      weather: {
+        fetched_at: "2026-08-19T12:05:00.001Z",
+      },
+    });
+
+    expect(result.dataCompletenessPct).toBeLessThan(100);
+  });
+
+  it("missing analysis reference time fails closed for weather", () => {
+    const result =
+      evaluateProjectContext(
+        0.45,
+        baseCropProfile,
+        baseStageProfile,
+        "Vegetativní růst",
+        baseWeather,
+        [],
+        null,
+        baseSoilProfile
+      );
+
+    expect(result.dataCompletenessPct).toBeLessThan(100);
+
+    expect(
+      result.scoreBreakdown.some(
+        (item) =>
+          item.label === "Teplota"
+      )
+    ).toBe(false);
+  });
+});

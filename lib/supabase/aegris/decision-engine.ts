@@ -67,6 +67,48 @@ export type WeatherData = {
   fetched_at: string;
 };
 
+const WEATHER_MAX_AGE_MS =
+  60 * 60 * 1000;
+
+const WEATHER_FUTURE_TOLERANCE_MS =
+  5 * 60 * 1000;
+
+function getFreshWeather(
+  weather: WeatherData | null,
+  referenceTime: string | null
+): WeatherData | null {
+  if (!weather) {
+    return null;
+  }
+
+  const fetchedAt =
+    Date.parse(weather.fetched_at);
+
+  const referenceAt =
+    referenceTime
+      ? Date.parse(referenceTime)
+      : NaN;
+
+  if (
+    !Number.isFinite(fetchedAt) ||
+    !Number.isFinite(referenceAt)
+  ) {
+    return null;
+  }
+
+  const ageMs =
+    referenceAt - fetchedAt;
+
+  if (
+    ageMs < -WEATHER_FUTURE_TOLERANCE_MS ||
+    ageMs > WEATHER_MAX_AGE_MS
+  ) {
+    return null;
+  }
+
+  return weather;
+}
+
 export type NdviTrend = {
   direction: "Rostoucí" | "Klesající" | "Stabilní" | "Nedostatek dat";
   slope: number | null;
@@ -365,6 +407,11 @@ export function evaluateProjectContext(
   analysisCreatedAt: string | null = null,
   soilProfile: ProjectSoilProfile | null = null
 ): ContextEvaluation {
+  weather = getFreshWeather(
+    weather,
+    analysisCreatedAt
+  );
+
   if (
     ndvi == null ||
     !Number.isFinite(ndvi)

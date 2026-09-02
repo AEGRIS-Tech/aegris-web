@@ -306,10 +306,6 @@ export async function fetchProjectWeather(
     evapotranspiration_mm:
       next24hEt0,
 
-    fetched_at:
-      String(
-        current.time ??
-          new Date().toISOString()
-      ),
+    fetched_at: new Date().toISOString(),
   };
 }

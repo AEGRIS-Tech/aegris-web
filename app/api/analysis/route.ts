@@ -23,7 +23,7 @@ const STATS_URL =
 const MIN_VALID_GEOMETRY_PCT = 60;
 const ANALYSIS_LOCK_STALE_SECONDS = 15 * 60;
 const AEGRIS_ENGINE_VERSION = "1.0.0";
-const AEGRIS_RULESET_VERSION = "2026-09-02.1";
+const AEGRIS_RULESET_VERSION = "2026-09-02.2";
 
 type BoundaryPoint = {
   latitude: number;
