@@ -127,7 +127,23 @@ export async function fetchProjectWeather(
     );
   }
 
-  const data = await response.json();
+  /*
+   * Odpověď čteme nejprve jako text.
+   * Pokud upstream vrátí HTTP 2xx, ale tělo není validní JSON,
+   * zachováme část skutečné odpovědi v chybě pro diagnostiku.
+   */
+  const responseText =
+    await response.text();
+
+  let data: Record<string, any>;
+
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error(
+      `Open-Meteo returned invalid JSON: ${responseText.slice(0, 300)}`
+    );
+  }
 
   const current =
     data.current ?? {};
@@ -306,6 +322,12 @@ export async function fetchProjectWeather(
     evapotranspiration_mm:
       next24hEt0,
 
-    fetched_at: new Date().toISOString(),
+    /*
+     * Jde o čas, kdy AEGRIS weather payload skutečně získal.
+     * Nepoužíváme current.time z Open-Meteo, protože při
+     * timezone=auto nemusí obsahovat explicitní UTC offset.
+     */
+    fetched_at:
+      new Date().toISOString(),
   };
 }
