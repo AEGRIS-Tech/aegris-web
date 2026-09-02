@@ -1,6 +1,8 @@
 import type { WeatherData } from "@/lib/supabase/aegris/decision-engine";
 
-function numberOrNull(value: unknown): number | null {
+function numberOrNull(
+  value: unknown
+): number | null {
   if (
     value === null ||
     value === undefined ||
@@ -112,34 +114,69 @@ export async function fetchProjectWeather(
     "mm"
   );
 
-  const response = await fetch(
-    url.toString(),
-    {
-      cache: "no-store",
-    }
-  );
+  let data: Record<string, any> | null =
+    null;
 
-  if (!response.ok) {
-    throw new Error(
-      `Open-Meteo returned ${response.status}`
-    );
+  let lastError: Error | null =
+    null;
+
+  for (
+    let attempt = 1;
+    attempt <= 2;
+    attempt++
+  ) {
+    try {
+      const response = await fetch(
+        url.toString(),
+        {
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Open-Meteo returned ${response.status}`
+        );
+      }
+
+      const responseText =
+        await response.text();
+
+      try {
+        data =
+          JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          `Open-Meteo returned invalid JSON: ${responseText.slice(0, 300)}`
+        );
+      }
+
+      break;
+    } catch (error) {
+      lastError =
+        error instanceof Error
+          ? error
+          : new Error(
+              "Open-Meteo request failed"
+            );
+
+      if (attempt === 2) {
+        throw lastError;
+      }
+
+      await new Promise(
+        (resolve) =>
+          setTimeout(resolve, 250)
+      );
+    }
   }
 
-  /*
-   * Odpověď čteme nejprve jako text.
-   * Pokud upstream vrátí HTTP 2xx, ale tělo není validní JSON,
-   * zachováme část skutečné odpovědi v chybě pro diagnostiku.
-   */
-  const responseText =
-    await response.text();
-
-  let data: Record<string, any>;
-
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(
-      `Open-Meteo returned invalid JSON: ${responseText.slice(0, 300)}`
+  if (!data) {
+    throw (
+      lastError ??
+      new Error(
+        "Open-Meteo returned no data"
+      )
     );
   }
 
