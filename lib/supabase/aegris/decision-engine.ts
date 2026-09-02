@@ -243,34 +243,18 @@ export function calculateNdviTrend(
     analysisCreatedAt
   );
 
-  const historical = canonical.filter(
-  (item) => !(item.id === -1)
-);
+  // buildCanonicalNdviHistory zaručuje, že při platném currentNdvi
+  // je aktuální měření posledním bodem časové řady právě jednou.
+  const trendPoints = canonical.slice(-6);
+  const historical = canonical.slice(0, -1);
 
-// Pokud je poslední historický záznam stejné měření
-// jako aktuální NDVI, nesmí být použit jako previousNdvi.
-// Aktuální měření už přidáváme níže samostatně.
-const historicalWithoutCurrent =
-  historical.filter(
-    (item) =>
-      Math.abs(
-        Number(item.ndvi) - currentNdvi
-      ) >= 0.0005
-  );
-
-const previousNdvi =
-  historicalWithoutCurrent.length
-    ? Number(
-        historicalWithoutCurrent[
-          historicalWithoutCurrent.length - 1
-        ].ndvi
-      )
+  const previousNdvi = historical.length
+    ? Number(historical[historical.length - 1].ndvi)
     : null;
 
-const values = historicalWithoutCurrent
-  .slice(-5)
-  .map((item) => Number(item.ndvi))
-  .concat(currentNdvi);
+  const values = trendPoints.map(
+    (item) => Number(item.ndvi)
+  );
 
   if (values.length < 2) {
     return {
@@ -287,11 +271,32 @@ const values = historicalWithoutCurrent
     };
   }
 
-  const n = values.length;
-  const xMean = (n - 1) / 2;
+  const firstTrendTime =
+    ndviHistoryTime(trendPoints[0]);
+
+  const TEN_DAYS_MS =
+    10 * 24 * 60 * 60 * 1000;
+
+  const xValues = trendPoints.map(
+    (item) =>
+      (ndviHistoryTime(item) - firstTrendTime) /
+      TEN_DAYS_MS
+  );
+
+  const yValues = trendPoints.map(
+    (item) => Number(item.ndvi)
+  );
+
+  const n = trendPoints.length;
+
+  const xMean =
+    xValues.reduce(
+      (sum, value) => sum + value,
+      0
+    ) / n;
 
   const yMean =
-    values.reduce(
+    yValues.reduce(
       (sum, value) => sum + value,
       0
     ) / n;
@@ -299,15 +304,16 @@ const values = historicalWithoutCurrent
   let numerator = 0;
   let denominator = 0;
 
-  values.forEach((value, index) => {
-    const xDelta = index - xMean;
+  for (let index = 0; index < n; index++) {
+    const xDelta =
+      xValues[index] - xMean;
 
     numerator +=
-      xDelta * (value - yMean);
+      xDelta * (yValues[index] - yMean);
 
     denominator +=
       xDelta * xDelta;
-  });
+  }
 
   const slope =
     denominator > 0
@@ -549,10 +555,10 @@ export function evaluateProjectContext(
       analysisCreatedAt
     );
 
+  // Aktuální NDVI je v kanonické řadě vždy poslední bod.
+  // Trend history proto obsahuje pouze skutečně předchozí měření.
   const historicalNdvi =
-    canonicalNdviHistory.filter(
-      (item) => item.id !== -1
-    );
+    canonicalNdviHistory.slice(0, -1);
 
   const trendHistory =
     historicalNdvi.slice(-5);
@@ -596,7 +602,7 @@ export function evaluateProjectContext(
         label: "Trend NDVI",
         status: "Kritické",
         detail:
-          `NDVI má za posledních ${ndviTrend.points} měření výrazně klesající trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/měření a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+          `NDVI má za posledních ${ndviTrend.points} měření výrazně klesající trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI / 10 dní a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
       });
 
       actions.push(
@@ -609,7 +615,7 @@ export function evaluateProjectContext(
         label: "Trend NDVI",
         status: "Upozornění",
         detail:
-          `NDVI má za posledních ${ndviTrend.points} měření klesající trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/měření a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+          `NDVI má za posledních ${ndviTrend.points} měření klesající trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI / 10 dní a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
       });
 
       actions.push(
@@ -620,7 +626,7 @@ export function evaluateProjectContext(
         label: "Trend NDVI",
         status: "OK",
         detail:
-          `NDVI má za posledních ${ndviTrend.points} měření ${ndviTrend.direction.toLowerCase()} trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI/měření a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
+          `NDVI má za posledních ${ndviTrend.points} měření ${ndviTrend.direction.toLowerCase()} trend. Lineární sklon je ${slope >= 0 ? "+" : ""}${slope.toFixed(3)} NDVI / 10 dní a celková změna činí ${overallDelta >= 0 ? "+" : ""}${overallDelta.toFixed(3)} (${overallRelativeChange >= 0 ? "+" : ""}${overallRelativeChange.toFixed(1)} %).`,
       });
     }
   } else if (
@@ -828,10 +834,9 @@ export function evaluateProjectContext(
   // ---------------------------------------------------------
   // 4. Vlhkost půdy
   // ---------------------------------------------------------
-  // Půdní vlhkost interpretujeme pouze tehdy, pokud máme
-  // projektový půdní profil s FC a PWP.
-  // Samotná hodnota soil moisture bez půdního kontextu
-  // není dostatečná pro výpočet vodního stresu.
+  // Preferujeme projektový půdní profil s FC a PWP.
+  // Pokud chybí, lze použít pouze orientační fallback podle
+  // doporučeného rozsahu plodiny; ten není ekvivalentem FC/PWP.
 
   if (
     weather?.soil_moisture_pct != null &&
@@ -955,11 +960,14 @@ export function evaluateProjectContext(
           ? min - soil
           : soil - max;
 
+      // Stejná škála jako kanonický soil-moisture score níže:
+      // hranice doporučeného pásma = 100, jeden celý rozsah
+      // mimo pásmo = 30, dále plynule až k 0.
       const score = Math.max(
         0,
         Math.min(
           100,
-          70 -
+          100 -
             (outsideDistance / range) *
               70
         )
@@ -1007,6 +1015,13 @@ export function evaluateProjectContext(
         actions.push(
           "Sledovat půdní vlhkost a vývoj vodního stresu porostu."
         );
+      } else {
+        factors.push({
+          label: "Vlhkost půdy",
+          status: "OK",
+          detail:
+            `Aktuální půdní vlhkost ${soil.toFixed(1)} % je mírně mimo doporučený rozsah ${min.toFixed(1)}–${max.toFixed(1)} %, ale nedosahuje varovného prahu. Hodnocení je orientační, protože projektový půdní profil s field capacity a wilting point není k dispozici.`,
+        });
       }
     } else {
       factors.push({
@@ -1351,7 +1366,7 @@ export function evaluateProjectContext(
   const hasLowNdvi =
     ndvi < target * 0.8;
 
-      // ---------------------------------------------------------
+  // ---------------------------------------------------------
   // Diagnostika pravděpodobné příčiny
   // ---------------------------------------------------------
 
@@ -1431,8 +1446,25 @@ export function evaluateProjectContext(
     );
   }
 
+  const hasDirectWaterEvidence =
+    (
+      soilMoistureFactor &&
+      (
+        soilMoistureFactor.status === "Upozornění" ||
+        soilMoistureFactor.status === "Kritické"
+      )
+    ) ||
+    (
+      waterBalanceFactor &&
+      (
+        waterBalanceFactor.status === "Upozornění" ||
+        waterBalanceFactor.status === "Kritické"
+      )
+    );
+
   if (
-    waterEvidence.length >= 2
+    waterEvidence.length >= 2 &&
+    hasDirectWaterEvidence
   ) {
     const criticalWaterFactors =
       [
@@ -1592,51 +1624,11 @@ export function evaluateProjectContext(
     number | null = null;
 
   if (trendHistory.length >= 2) {
-    const values = [
-      ...trendHistory.map(
-        (item) => Number(item.ndvi)
-      ),
-      ndvi,
-    ].filter(Number.isFinite);
-
-    const n = values.length;
-    const xMean = (n - 1) / 2;
-
-    const yMean =
-      values.reduce(
-        (sum, value) => sum + value,
-        0
-      ) / n;
-
-    let numerator = 0;
-    let denominator = 0;
-
-    values.forEach(
-      (value, index) => {
-        const xDelta =
-          index - xMean;
-
-        numerator +=
-          xDelta * (value - yMean);
-
-        denominator +=
-          xDelta * xDelta;
-      }
-    );
-
     const slope =
-      denominator > 0
-        ? numerator / denominator
-        : 0;
-
-    const first = values[0];
+      ndviTrend.slope ?? 0;
 
     const relativeChangePct =
-      Math.abs(first) > 0
-        ? ((ndvi - first) /
-            Math.abs(first)) *
-          100
-        : 0;
+      ndviTrend.overallRelativeChangePct ?? 0;
 
     const relativeScore =
       scoreInterpolate(
@@ -1669,7 +1661,7 @@ export function evaluateProjectContext(
         relativeScore * 0.6 +
         slopeScore * 0.4
       );
-} else if (
+  } else if (
     previousNdvi != null &&
     Number.isFinite(previousNdvi)
   ) {
@@ -1996,15 +1988,19 @@ export function evaluateProjectContext(
   let level:
     ContextEvaluation["level"];
 
-  if (score >= 70) {
-    level =
-      warningCount > 0
-        ? "Upozornění"
-        : "Optimální";
-  } else if (score >= 40) {
+  const hasSufficientDataForOptimal =
+    dataCompletenessPct >= 83;
+
+  if (criticalCount > 0) {
+    level = "Kritické";
+  } else if (
+    warningCount > 0 ||
+    score < 70 ||
+    !hasSufficientDataForOptimal
+  ) {
     level = "Upozornění";
   } else {
-    level = "Kritické";
+    level = "Optimální";
   }
 
   const cropLabel =

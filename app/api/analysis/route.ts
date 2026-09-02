@@ -900,27 +900,38 @@ export async function POST(request: Request) {
       ndvi: item.ndvi,
     }));
 
-    const { error: deleteHistoryError } = await serviceSupabase
-      .from("ndvi_history")
-      .delete()
-      .eq("project_id", projectId);
-
-    if (deleteHistoryError) {
-      console.error(
-        "CHYBA SMAZÁNÍ NDVI HISTORY:",
-        deleteHistoryError
-      );
-    } else {
-      const { error: insertHistoryError } = await serviceSupabase
-        .from("ndvi_history")
-        .insert(historyRows);
-
-      if (insertHistoryError) {
-        console.error(
-          "CHYBA ULOŽENÍ NDVI HISTORY:",
-          insertHistoryError
-        );
+    /*
+     * NDVI HISTORY PERSISTENCE
+     *
+     * Nahrazení historie musí být atomické. RPC běží jako jeden
+     * PostgreSQL statement: pokud DELETE nebo INSERT selže, celá
+     * operace se rollbackne a původní historie zůstane zachována.
+     *
+     * Endpoint je fail-closed: bez bezpečně uložené historie
+     * nepokračujeme k persistence analysis/recommendation.
+     */
+    const { error: replaceHistoryError } = await serviceSupabase.rpc(
+      "replace_project_ndvi_history",
+      {
+        p_project_id: projectId,
+        p_rows: historyRows,
       }
+    );
+
+    if (replaceHistoryError) {
+      console.error(
+        "NDVI HISTORY ATOMIC REPLACE ERROR:",
+        replaceHistoryError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "NDVI historii se nepodařilo bezpečně uložit. Analýza nebyla dokončena.",
+          code: "NDVI_HISTORY_PERSISTENCE_FAILED",
+        },
+        { status: 500 }
+      );
     }
 
     const first = history[0];

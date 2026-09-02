@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  calculateNdviTrend,
   evaluateProjectContext,
   type CropProfile,
   type CropStageProfile,
@@ -901,6 +902,301 @@ describe("AEGRIS Decision Engine — prioritizace akcí", () => {
 
     expect(result.actions).toContain(
       "Provést prioritní terénní kontrolu porostu před rozhodnutím o zásahu."
+    );
+  });
+});
+describe("AEGRIS Decision Engine - critical level regression", () => {
+  it("critical factor must never produce optimal level", () => {
+    const result = evaluate({
+      weather: {
+        temperature_c: 32,
+      },
+    });
+
+    expect(result.criticalFactorCount).toBeGreaterThan(0);
+    expect(result.warningFactorCount).toBe(0);
+    expect(result.score).toBeGreaterThanOrEqual(70);
+
+    expect(result.level).not.toBe("Optim\u00e1ln\u00ed");
+  });
+});
+describe("AEGRIS Decision Engine - NDVI history regression", () => {
+  it("historical NDVI equal to current value must not be removed when timestamp differs", () => {
+    const history: NdviHistory[] = [
+      {
+        id: 1,
+        project_id: 1,
+        period_from: "2026-07-01T00:00:00.000Z",
+        period_to: "2026-07-01T00:00:00.000Z",
+        ndvi: 0.45,
+        created_at: "2026-07-01T00:00:00.000Z",
+      },
+      {
+        id: 2,
+        project_id: 1,
+        period_from: "2026-08-01T00:00:00.000Z",
+        period_to: "2026-08-01T00:00:00.000Z",
+        ndvi: 0.30,
+        created_at: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+
+    const result = calculateNdviTrend(
+      history,
+      0.45,
+      "2026-08-19T12:00:00.000Z"
+    );
+
+    expect(result.previousNdvi).toBe(0.30);
+    expect(result.overallDelta).toBeCloseTo(0, 5);
+    expect(result.overallRelativeChangePct).toBeCloseTo(0, 5);
+  });
+});
+
+describe("AEGRIS Decision Engine - water stress diagnosis regression", () => {
+  it("NDVI plus NDVI trend alone must not diagnose water stress", () => {
+    const result = evaluate({
+      ndvi: 0.25,
+      previousNdvi: 0.40,
+      weather: {
+        soil_moisture_pct: 35,
+        next24h_precipitation_mm: 8,
+        evapotranspiration_mm: 1,
+      },
+      soil: {
+        field_capacity_pct: 35,
+        wilting_point_pct: 15,
+      },
+    });
+
+    const waterStressDiagnosis =
+      result.diagnoses.find(
+        (diagnosis) =>
+          diagnosis.code === "WATER_STRESS"
+      );
+
+    expect(waterStressDiagnosis).toBeUndefined();
+  });
+});
+
+describe("AEGRIS Decision Engine - completeness regression", () => {
+  it("low data completeness must not produce optimal level", () => {
+    const result = evaluate({
+      ndvi: 0.60,
+      previousNdvi: 0.59,
+      weather: null,
+      soil: null,
+    });
+
+    expect(result.dataCompletenessPct).toBeLessThan(70);
+    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.level).not.toBe("Optim\u00e1ln\u00ed");
+  });
+});
+
+describe("AEGRIS Decision Engine - completeness boundary", () => {
+  it("83 percent completeness can still produce optimal level", () => {
+    const result = evaluate({
+      ndvi: 0.60,
+      previousNdvi: 0.59,
+      weather: {
+        soil_moisture_pct: undefined,
+      },
+      soil: null,
+    });
+
+    expect(result.dataCompletenessPct).toBe(83);
+    expect(result.score).toBeGreaterThanOrEqual(70);
+    expect(result.criticalFactorCount).toBe(0);
+    expect(result.warningFactorCount).toBe(0);
+    expect(result.level).toBe("Optim\u00e1ln\u00ed");
+  });
+});
+
+describe("AEGRIS Decision Engine - time-aware NDVI trend regression", () => {
+  it("same NDVI decline over shorter time must have steeper negative slope", () => {
+    const fastHistory: NdviHistory[] = [
+      {
+        id: 1,
+        project_id: 1,
+        period_from: "2026-08-09T00:00:00.000Z",
+        period_to: "2026-08-09T00:00:00.000Z",
+        ndvi: 0.60,
+        created_at: "2026-08-09T00:00:00.000Z",
+      },
+    ];
+
+    const slowHistory: NdviHistory[] = [
+      {
+        id: 2,
+        project_id: 1,
+        period_from: "2026-07-10T00:00:00.000Z",
+        period_to: "2026-07-10T00:00:00.000Z",
+        ndvi: 0.60,
+        created_at: "2026-07-10T00:00:00.000Z",
+      },
+    ];
+
+    const fast = calculateNdviTrend(
+      fastHistory,
+      0.50,
+      "2026-08-19T00:00:00.000Z"
+    );
+
+    const slow = calculateNdviTrend(
+      slowHistory,
+      0.50,
+      "2026-08-19T00:00:00.000Z"
+    );
+
+    expect(fast.slope).not.toBeNull();
+    expect(slow.slope).not.toBeNull();
+
+    expect(Math.abs(fast.slope!)).toBeGreaterThan(
+      Math.abs(slow.slope!)
+    );
+  });
+});
+
+describe("AEGRIS Decision Engine - canonical time-aware trend score regression", () => {
+  it("same NDVI decline over shorter time must produce worse Trend NDVI score", () => {
+    const evaluateWithHistory = (
+      historyDate: string
+    ) => {
+      const history: NdviHistory[] = [
+        {
+          id: 1,
+          project_id: 1,
+          period_from: historyDate,
+          period_to: historyDate,
+          ndvi: 0.60,
+          created_at: historyDate,
+        },
+        {
+          id: 2,
+          project_id: 1,
+          period_from: "2026-08-09T00:00:00.000Z",
+          period_to: "2026-08-09T00:00:00.000Z",
+          ndvi: 0.55,
+          created_at: "2026-08-09T00:00:00.000Z",
+        },
+      ];
+
+      return evaluateProjectContext(
+        0.50,
+        baseCropProfile,
+        baseStageProfile,
+        "Vegetativní růst",
+        baseWeather,
+        history,
+        "2026-08-19T00:00:00.000Z",
+        baseSoilProfile
+      );
+    };
+
+    const fast = evaluateWithHistory(
+      "2026-07-30T00:00:00.000Z"
+    );
+
+    const slow = evaluateWithHistory(
+      "2026-06-10T00:00:00.000Z"
+    );
+
+    const fastTrendScore =
+      fast.scoreBreakdown.find(
+        (item) => item.label === "Trend NDVI"
+      )?.score;
+
+    const slowTrendScore =
+      slow.scoreBreakdown.find(
+        (item) => item.label === "Trend NDVI"
+      )?.score;
+
+    expect(fastTrendScore).toBeDefined();
+    expect(slowTrendScore).toBeDefined();
+
+    expect(fastTrendScore!).toBeLessThan(
+      slowTrendScore!
+    );
+  });
+});
+
+describe("AEGRIS Decision Engine - soil moisture fallback regression", () => {
+  it("slightly outside crop fallback range must still create a soil moisture factor", () => {
+    const result = evaluate({
+      weather: {
+        soil_moisture_pct: 14.9,
+      },
+      soil: null,
+    });
+
+    const factor = result.factors.find(
+      (item) => item.label === "Vlhkost půdy"
+    );
+
+    expect(factor).toBeDefined();
+    expect(factor?.status).not.toBe("N/A");
+  });
+
+  it("crop fallback factor status must agree with its canonical score band", () => {
+    const result = evaluate({
+      weather: {
+        soil_moisture_pct: 10,
+      },
+      soil: null,
+    });
+
+    const factor = result.factors.find(
+      (item) => item.label === "Vlhkost půdy"
+    );
+
+    const score =
+      result.scoreBreakdown.find(
+        (item) => item.label === "Vlhkost půdy"
+      )?.score;
+
+    expect(factor).toBeDefined();
+    expect(score).toBeDefined();
+
+    const expectedStatus =
+      score! < 30
+        ? "Kritické"
+        : score! < 60
+          ? "Upozornění"
+          : "OK";
+
+    expect(factor?.status).toBe(expectedStatus);
+  });
+
+  it("soil moisture farther outside crop fallback range must not improve canonical score", () => {
+    const near = evaluate({
+      weather: {
+        soil_moisture_pct: 14,
+      },
+      soil: null,
+    });
+
+    const far = evaluate({
+      weather: {
+        soil_moisture_pct: 5,
+      },
+      soil: null,
+    });
+
+    const nearScore =
+      near.scoreBreakdown.find(
+        (item) => item.label === "Vlhkost půdy"
+      )?.score;
+
+    const farScore =
+      far.scoreBreakdown.find(
+        (item) => item.label === "Vlhkost půdy"
+      )?.score;
+
+    expect(nearScore).toBeDefined();
+    expect(farScore).toBeDefined();
+    expect(farScore!).toBeLessThanOrEqual(
+      nearScore!
     );
   });
 });

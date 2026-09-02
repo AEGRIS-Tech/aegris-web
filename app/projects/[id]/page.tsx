@@ -126,6 +126,7 @@ export default function ProjectDetailPage() {
   const [growthStage, setGrowthStage] = useState("");
 
   const [savingCrop, setSavingCrop] = useState(false);
+  const [cropEditorOpen, setCropEditorOpen] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const analysisRunRef = useRef(false);
   const loadRequestRef = useRef(0);
@@ -644,9 +645,11 @@ setAreaError("");
         growth_stage:
           growthStage.trim() || null,
         growth_stage_updated_at:
-          growthStage
-            ? new Date().toISOString()
-            : null,
+          (growthStage.trim() || null) !== (project.growth_stage ?? null)
+            ? growthStage.trim()
+              ? new Date().toISOString()
+              : null
+            : project.growth_stage_updated_at ?? null,
       })
       .eq("id", project.id)
       .select()
@@ -683,390 +686,73 @@ setAreaError("");
 
     try {
       const response = await fetch(
-      `/api/analysis?projectId=${project.id}`
-     );
+        `/api/analysis?projectId=${project.id}`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
+      );
 
-      const result = await response.json();
+      const responseText = await response.text();
+
+      let result: Record<string, unknown> | null = null;
+
+      if (responseText) {
+        try {
+          result = JSON.parse(responseText) as Record<string, unknown>;
+        } catch {
+          result = null;
+        }
+      }
 
       if (!response.ok) {
+        console.error("CHYBA API ANALÝZY:", {
+          status: response.status,
+          statusText: response.statusText,
+          response: result ?? (responseText || null),
+        });
+        return;
+      }
+
+      if (!result) {
         console.error(
-          "CHYBA API ANALÝZY:",
-          result
+          "CHYBA API ANALÝZY: Server vrátil úspěch bez platné JSON odpovědi."
         );
         return;
       }
 
-      const ndvi = Number(result.ndvi);
-
-const freshNdviHistory: NdviHistory[] =
-        Array.isArray(result.history)
-          ? result.history
-              .map((item: unknown) => {
-                if (
-                  item === null ||
-                  typeof item !== "object"
-                ) {
-                  return null;
-                }
-
-                const candidate =
-                  item as Record<string, unknown>;
-
-                const periodFrom =
-                  typeof candidate.from === "string"
-                    ? candidate.from
-                    : null;
-
-                const periodTo =
-                  typeof candidate.to === "string"
-                    ? candidate.to
-                    : null;
-
-                const historyNdvi = Number(
-                  candidate.ndvi
-                );
-
-                if (
-                  !periodFrom ||
-                  !periodTo ||
-                  !Number.isFinite(historyNdvi)
-                ) {
-                  return null;
-                }
-
-                return {
-                  id: 0,
-                  project_id: project.id,
-                  period_from: periodFrom,
-                  period_to: periodTo,
-                  ndvi: historyNdvi,
-                  created_at:
-                    new Date().toISOString(),
-                };
-              })
-              .filter(
-                (item: NdviHistory | null): item is NdviHistory =>
-                  item !== null
-              )
-          : [];
-
-      const effectiveNdviHistory =
-        freshNdviHistory.length > 0
-          ? freshNdviHistory
-          : ndviHistory;
-
-      setNdviHistory(effectiveNdviHistory);
-
-      if (!Number.isFinite(ndvi)) {
-        console.error(
-          "API VRÁTILO NEPLATNÉ NDVI:",
-          result.ndvi
-        );
-        return;
-      }
-
-      const vegetation = Math.round(ndvi * 100);
-
-      // ---------------------------------------------------------
-      // AEGRIS DECISION ENGINE = jediný zdroj pravdy pro risk
-      // ---------------------------------------------------------
-      const analysisCreatedAt = new Date().toISOString();
-
-      const recommendation = evaluateProjectContext(
-        ndvi,
-        selectedCropProfile,
-        selectedCropStageProfile,
-        growthStage,
-        weather,
-        effectiveNdviHistory,
-        analysisCreatedAt,
-        soilProfile
-      );
-
-      // DB tabulka analysis používá starší pole "risk".
-      // Hodnotu ale už neurčujeme pouze podle NDVI.
-      // Převádíme kanonickou AEGRIS prioritu do staršího formátu.
-      const risk =
-        recommendation.priority === "Kritická"
-          ? "Kritické"
-          : recommendation.priority === "Vysoká"
-            ? "Vysoké"
-            : recommendation.priority === "Střední"
-              ? "Střední"
-              : "Nízké";
-
-const {
-  data,
-  error,
-} = await supabase
-  .from("analysis")
-  .insert({
-    project_id: project.id,
-    ndvi,
-    vegetation,
-    risk,
-    period_from:
-      Array.isArray(result.history) && result.history.length > 0
-        ? result.history[result.history.length - 1].from
-        : null,
-    period_to:
-      Array.isArray(result.history) && result.history.length > 0
-        ? result.history[result.history.length - 1].to
-        : null,
-
-    // Zdroj dat - hodnoty pochází přímo z /api/analysis.
-    source_provider:
-      typeof result.source?.provider === "string"
-        ? result.source.provider
-        : null,
-    satellite:
-      typeof result.source?.satellite === "string"
-        ? result.source.satellite
-        : null,
-    satellite_product:
-      typeof result.source?.product === "string"
-        ? result.source.product
-        : null,
-    spatial_resolution_m:
-      Number.isFinite(Number(result.source?.spatialResolutionMeters))
-        ? Number(result.source.spatialResolutionMeters)
-        : null,
-    analysis_crs:
-      typeof result.source?.analysisCrs === "string"
-        ? result.source.analysisCrs
-        : null,
-    analysis_utm_zone:
-      Number.isFinite(Number(result.source?.analysisUtmZone))
-        ? Number(result.source.analysisUtmZone)
-        : null,
-
-    // Kvalita dat - rovněž přímo z odpovědi Sentinel/Copernicus analýzy.
-    geometry_pixel_count:
-      Number.isFinite(Number(result.quality?.geometryPixelCount))
-        ? Number(result.quality.geometryPixelCount)
-        : null,
-    valid_pixel_count:
-      Number.isFinite(Number(result.quality?.latestValidPixelCount))
-        ? Number(result.quality.latestValidPixelCount)
-        : null,
-    valid_geometry_pct:
-      Number.isFinite(Number(result.quality?.latestValidGeometryPct))
-        ? Number(result.quality.latestValidGeometryPct)
-        : null,
-    accepted_intervals:
-      Number.isFinite(Number(result.quality?.acceptedIntervals))
-        ? Number(result.quality.acceptedIntervals)
-        : null,
-    rejected_intervals:
-      Number.isFinite(Number(result.quality?.rejectedIntervals))
-        ? Number(result.quality.rejectedIntervals)
-        : null,
-    quality_gate_pct:
-      Number.isFinite(Number(result.quality?.minValidGeometryPct))
-        ? Number(result.quality.minValidGeometryPct)
-        : null,
-
-    // Distribuce NDVI posledního přijatého intervalu.
-    median_ndvi:
-      Number.isFinite(Number(result.medianNdvi))
-        ? Number(result.medianNdvi)
-        : null,
-    p05_ndvi:
-      Number.isFinite(Number(result.p05Ndvi))
-        ? Number(result.p05Ndvi)
-        : null,
-    p95_ndvi:
-      Number.isFinite(Number(result.p95Ndvi))
-        ? Number(result.p95Ndvi)
-        : null,
-  })
-  .select()
-  .single();
-
-      if (error) {
-        console.error(
-          "CHYBA INSERTU ANALÝZY:",
-          error
-        );
-        return;
-      }
-
-      setAnalysis(data);
-
-      const {
-        data: recommendationData,
-        error: recommendationInsertError,
-      } = await supabase
-        .from("aegris_recommendations")
-        .upsert(
-          {
-            project_id: project.id,
-            analysis_id: data.id,
-            crop_name: cropName || null,
-            growth_stage: growthStage || null,
-            ndvi,
-            level: recommendation.level,
-            priority: recommendation.priority,
-            score: recommendation.score,
-            summary: recommendation.summary,
-            recommendation: recommendation.recommendation,
-            actions: recommendation.actions,
-            weather_snapshot: weather,
-          },
-          { onConflict: "analysis_id" }
-        )
-        .select()
-        .single();
-
-      if (recommendationInsertError) {
-        console.error(
-          "CHYBA ULOŽENÍ HISTORIE AEGRIS:",
-          recommendationInsertError
-        );
-      } else if (recommendationData) {
-        const savedRecommendation =
-          recommendationData as AegrisRecommendation;
-
-        setRecommendationHistory((current) => [
-          savedRecommendation,
-          ...current.filter(
-            (item) => item.analysis_id !== savedRecommendation.analysis_id
-          ),
-        ]);
-      }
-
-      // ---------------------------------------------------------
-      // AEGRIS ALERT
-      // Kritický / varovný / informační stav se pro projekt drží
-      // jako jeden aktivní (nepřečtený) alert stejného typu.
-      // Opakované spuštění analýzy tedy nevytváří kopie.
-      //
-      // NULL v is_read bereme stejně jako false, protože starší
-      // databázové záznamy mohou mít tento sloupec nevyplněný.
-      // ---------------------------------------------------------
-
-      const alertLevel: AegrisAlert["level"] =
-        recommendation.level === "Kritické"
-          ? "critical"
-          : recommendation.level === "Upozornění"
-            ? "warning"
-            : "info";
-
-      const alertTitle =
-        recommendation.level === "Kritické"
-          ? "Kritický stav projektu"
-          : recommendation.level === "Upozornění"
-            ? "AEGRIS upozornění"
-            : "AEGRIS informační stav";
-
-      const alertMessage =
-        `${recommendation.summary} ${recommendation.recommendation}`.trim();
-
-      // Po změně stavu nesmí zůstat starý nepřečtený alert
-      // jiné úrovně. Jinak by dashboard mohl zobrazovat staré
-      // "Kritické" upozornění i po novém vyhodnocení.
-      const { error: staleAlertError } = await supabase
-        .from("aegris_alerts")
-        .update({ is_read: true })
-        .eq("project_id", project.id)
-        .neq("level", alertLevel)
-        .or("is_read.eq.false,is_read.is.null");
-
-      if (staleAlertError) {
-        console.error(
-          "CHYBA ČIŠTĚNÍ STARÝCH ALERTŮ AEGRIS:",
-          staleAlertError
-        );
-      }
-
-      const {
-        data: existingAlerts,
-        error: existingAlertError,
-      } = await supabase
-        .from("aegris_alerts")
-        .select("id")
-        .eq("project_id", project.id)
-        .eq("level", alertLevel)
-        .eq("title", alertTitle)
-        .or("is_read.eq.false,is_read.is.null")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (existingAlertError) {
-        console.error(
-          "CHYBA KONTROLY DUPLICITNÍHO ALERTU AEGRIS:",
-          existingAlertError
-        );
-      }
-
-      const existingAlert = existingAlerts?.[0] ?? null;
-      const duplicateAlertIds = (existingAlerts ?? [])
-        .slice(1)
-        .map((alert) => alert.id);
-
-      if (existingAlert?.id) {
-        const { error: alertUpdateError } = await supabase
-          .from("aegris_alerts")
-          .update({
-            analysis_id: data.id,
-            recommendation_id: recommendationData?.id ?? null,
-            priority: recommendation.priority,
-            message: alertMessage,
-            is_read: false,
-          })
-          .eq("id", existingAlert.id);
-
-        if (alertUpdateError) {
-          console.error(
-            "CHYBA AKTUALIZACE EXISTUJÍCÍHO ALERTU AEGRIS:",
-            alertUpdateError
-          );
-        }
-
-        if (duplicateAlertIds.length > 0) {
-          const { error: duplicateUpdateError } = await supabase
-            .from("aegris_alerts")
-            .update({ is_read: true })
-            .in("id", duplicateAlertIds);
-
-          if (duplicateUpdateError) {
-            console.error(
-              "CHYBA ČIŠTĚNÍ DUPLICITNÍCH ALERTŮ AEGRIS:",
-              duplicateUpdateError
-            );
-          }
-        }
-      } else {
-        const { error: alertInsertError } = await supabase
-          .from("aegris_alerts")
-          .insert({
-            project_id: project.id,
-            analysis_id: data.id,
-            recommendation_id: recommendationData?.id ?? null,
-            level: alertLevel,
-            priority: recommendation.priority,
-            title: alertTitle,
-            message: alertMessage,
-            is_read: false,
-          });
-
-        if (alertInsertError) {
-          console.error(
-            "CHYBA ULOŽENÍ ALERTU AEGRIS:",
-            alertInsertError
-          );
-        }
-      }
-
+      /*
+       * /api/analysis je autoritativní serverová cesta:
+       * - načte Sentinel / weather / soil / historii,
+       * - vyhodnotí Decision Engine,
+       * - atomicky nahradí ndvi_history,
+       * - uloží analysis + recommendation,
+       * - aktualizuje alert.
+       *
+       * Klient už nic z toho znovu nezapisuje do databáze.
+       * Po úspěchu pouze znovu načte serverem uložený stav.
+       */
+      await loadProject();
     } catch (error) {
-      console.error(
-        "CHYBA ANALÝZY:",
-        error
-      );
+      console.error("CHYBA ANALÝZY:", error);
     } finally {
       analysisRunRef.current = false;
       setRunningAnalysis(false);
     }
+  }
+
+  function openCropEditor() {
+    setCropEditorOpen(true);
+
+    window.requestAnimationFrame(() => {
+      document.getElementById("crop-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
   }
 
   async function markAlertAsRead(alertId: number) {
@@ -1623,7 +1309,7 @@ const {
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">DETAILY PROJEKTU</div>
             <div className="mt-3 space-y-1.5 text-[9px]">{[["Plodina", project.crop_name ?? "—"],["Odrůda", project.crop_variety ?? "—"],["Výměra", project.area_ha != null ? `${project.area_ha} ha` : "—"],["Růstová fáze", project.growth_stage ?? "—"],["Datum setí", project.sowing_date ? new Date(project.sowing_date).toLocaleDateString("cs-CZ") : "—"],["Očekávaná sklizeň", project.expected_harvest_date ? new Date(project.expected_harvest_date).toLocaleDateString("cs-CZ") : "—"],["Způsob pěstování", project.farming_method ?? "—"]].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-3 border-b border-slate-800/70 py-2"><span className="text-slate-500">{label}</span><span className="text-right font-semibold text-slate-200">{value}</span></div>)}</div>
             {organizationRole !== "viewer" && (
-              <button type="button" onClick={() => document.getElementById("crop-editor")?.scrollIntoView({ behavior: "smooth" })} className="mt-3 w-full rounded-lg bg-cyan-500 py-2 text-[9px] font-black text-slate-950 hover:bg-cyan-400">✎ Upravit údaje o plodině</button>
+              <button type="button" onClick={openCropEditor} className="mt-3 w-full rounded-lg bg-cyan-500 py-2 text-[9px] font-black text-slate-950 hover:bg-cyan-400">✎ Upravit údaje o plodině</button>
             )}
           </div>
 
@@ -1641,7 +1327,12 @@ const {
         {/* HIDDEN/LOW-PRIORITY EDITOR — functionality remains available */}
         {organizationRole !== "viewer" && (
         <section id="crop-editor" className="mt-3 rounded-xl border border-slate-800 bg-[#071225]/95 p-4">
-          <details>
+          <details
+            open={cropEditorOpen}
+            onToggle={(event) =>
+              setCropEditorOpen(event.currentTarget.open)
+            }
+          >
             <summary className="cursor-pointer list-none text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">EDITACE ÚDAJŮ O PLODINĚ</summary>
             <div className="mt-3 grid gap-3 lg:grid-cols-3">
               <label className="text-[9px] text-slate-500">Pěstovaná plodina<select value={cropName} onChange={(event) => { const nextCrop = event.target.value; setCropName(nextCrop); const nextCropProfile = cropProfiles.find((profile) => profile.name === nextCrop) ?? null; const availableStages = nextCropProfile ? cropStageProfiles.filter((stageProfile) => stageProfile.crop_profile_id === nextCropProfile.id).map((stageProfile) => stageProfile.growth_stage) : []; if (!availableStages.includes(growthStage)) setGrowthStage(availableStages[0] ?? ""); }} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"><option value="">Vyberte plodinu</option>{cropProfiles.map((profile) => <option key={profile.id} value={profile.name}>{profile.name}</option>)}</select></label>
@@ -1666,7 +1357,7 @@ const {
             {recentAnalyses.length === 0 && recentRecommendations.length === 0 && <div className="rounded-lg bg-[#061022] p-4 text-[9px] text-slate-500 md:col-span-2 xl:col-span-4">Zatím nejsou k dispozici historické události.</div>}
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2"><button type="button" onClick={() => document.getElementById("project-history")?.scrollIntoView({ behavior: "smooth" })} className="rounded-lg border border-slate-800 py-2 text-[9px] font-bold text-cyan-400">Zobrazit kompletní historii projektu</button>{organizationRole !== "viewer" ? (
-            <button type="button" onClick={() => document.getElementById("crop-editor")?.scrollIntoView({ behavior: "smooth" })} className="rounded-lg border border-slate-800 py-2 text-[9px] font-bold text-slate-400 hover:text-cyan-400">Upravit projektová data</button>
+            <button type="button" onClick={openCropEditor} className="rounded-lg border border-slate-800 py-2 text-[9px] font-bold text-slate-400 hover:text-cyan-400">Upravit projektová data</button>
           ) : (
             <div className="rounded-lg border border-slate-800 py-2 text-center text-[9px] font-bold text-slate-600">Pouze pro čtení</div>
           )}</div>
