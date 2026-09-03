@@ -1003,9 +1003,11 @@ export async function POST(
     });
 
     const {
-      token: _token,
+      token,
       ...publicInvitation
     } = invitationRow;
+
+    void token;
 
     return NextResponse.json(
       {
@@ -1340,10 +1342,12 @@ export async function PATCH(
     });
 
     const {
-      token: _token,
+      token,
       ...publicInvitation
     } =
       updatedInvitationRow;
+
+    void token;
 
     return NextResponse.json({
       ok: true,

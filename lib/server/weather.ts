@@ -114,8 +114,12 @@ export async function fetchProjectWeather(
     "mm"
   );
 
-  let data: Record<string, any> | null =
-    null;
+  let data:
+    | Record<
+        string,
+        Record<string, unknown>
+      >
+    | null = null;
 
   let lastError: Error | null =
     null;

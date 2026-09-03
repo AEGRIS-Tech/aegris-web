@@ -476,7 +476,7 @@ useEffect(() => {
 
   void loadCropProfiles();
   void loadCropStageProfiles();
-}, [params.id]);
+}, [loadProject]);
 /* eslint-enable react-hooks/set-state-in-effect */
 
   async function loadWeather(projectId: number) {

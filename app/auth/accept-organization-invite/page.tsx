@@ -22,17 +22,13 @@ function AcceptOrganizationInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const token = searchParams.get("token")?.trim() ?? "";
+
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    const token = searchParams.get("token")?.trim();
-
     if (!token) {
-      setErrorMessage(
-        "Pozvánka není platná nebo chybí její token."
-      );
-      setLoading(false);
       return;
     }
 
@@ -96,9 +92,13 @@ function AcceptOrganizationInviteContent() {
     }
 
     void acceptInvitation();
-  }, [router, searchParams]);
+  }, [router, token]);
 
-  if (loading) {
+  const displayedErrorMessage = token
+    ? errorMessage
+    : "Pozvánka není platná nebo chybí její token.";
+
+  if (token && loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
         <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl">
@@ -133,7 +133,7 @@ function AcceptOrganizationInviteContent() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-400">
-            {errorMessage}
+            {displayedErrorMessage}
           </p>
         </div>
 

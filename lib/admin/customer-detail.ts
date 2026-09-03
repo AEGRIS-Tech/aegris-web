@@ -15,6 +15,7 @@ export type AdminCustomerDetail = {
   systemRole: string;
   demoStartedAt: string | null;
   demoExpiresAt: string | null;
+  demoActive: boolean;
   createdAt: string | null;
   projects: AdminCustomerProject[];
   projectsCount: number;
@@ -146,6 +147,10 @@ export async function getAdminCustomerDetail(
       profileResult.data.demo_started_at,
     demoExpiresAt:
       profileResult.data.demo_expires_at,
+    demoActive:
+      profileResult.data.account_type === "demo" &&
+      typeof profileResult.data.demo_expires_at === "string" &&
+      Date.parse(profileResult.data.demo_expires_at) > Date.now(),
     createdAt:
       userResult.data.user.created_at ?? null,
     projects,

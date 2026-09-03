@@ -44,10 +44,7 @@ export default async function AdminCustomerDetailPage({
     notFound();
   }
 
-  const demoActive =
-    customer.accountType === "demo" &&
-    customer.demoExpiresAt &&
-    Date.parse(customer.demoExpiresAt) > Date.now();
+  const demoActive = customer.demoActive;
 
   return (
     <>

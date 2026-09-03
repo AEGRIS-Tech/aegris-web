@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { User } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
     // ============================================
 
     const authUsersByEmail =
-      new Map<string, any>();
+      new Map<string, User>();
 
     const AUTH_PAGE_SIZE = 1000;
     let authPage = 1;
