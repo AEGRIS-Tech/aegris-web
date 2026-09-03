@@ -53,8 +53,14 @@ export async function updateSession(request: NextRequest) {
     error,
   } = await supabase.auth.getUser();
 
-  if (error) {
-    console.error("SUPABASE PROXY AUTH ERROR:", error);
+  if (
+    error &&
+    error.name !== "AuthSessionMissingError"
+  ) {
+    console.error(
+      "SUPABASE PROXY AUTH ERROR:",
+       error
+     );
   }
 
   const pathname = request.nextUrl.pathname;
