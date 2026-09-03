@@ -130,6 +130,7 @@ export async function fetchProjectWeather(
         url.toString(),
         {
           cache: "no-store",
+          signal: AbortSignal.timeout(8_000),
         }
       );
 
