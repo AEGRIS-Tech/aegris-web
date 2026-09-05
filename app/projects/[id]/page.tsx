@@ -13,6 +13,8 @@ type Project = {
   longitude: number;
   status: string;
   created_at: string;
+  crop_catalog_id?: number | null;
+  variety_catalog_id?: number | null;
   crop_name?: string | null;
   crop_variety?: string | null;
   sowing_date?: string | null;
@@ -22,6 +24,24 @@ type Project = {
   growth_stage?: string | null;
   growth_stage_updated_at?: string | null;
   organization_id?: string | null;
+};
+
+type CropCatalogItem = {
+  id: number;
+  name: string;
+  scientific_name: string | null;
+  external_code: string | null;
+  crop_profile_id: number | null;
+};
+
+type VarietyCatalogItem = {
+  id: number;
+  crop_id: number;
+  name: string;
+  external_code: string | null;
+  registration_status: string | null;
+  registration_status_code: string | null;
+  active: boolean;
 };
 
 type Analysis = {
@@ -108,6 +128,9 @@ export default function ProjectDetailPage() {
   const [ndviHistory, setNdviHistory] = useState<NdviHistory[]>([]);
   const [cropProfiles, setCropProfiles] = useState<CropProfile[]>([]);
   const [cropStageProfiles, setCropStageProfiles] = useState<CropStageProfile[]>([]);
+  const [cropCatalog, setCropCatalog] = useState<CropCatalogItem[]>([]);
+  const [varietyCatalog, setVarietyCatalog] = useState<VarietyCatalogItem[]>([]);
+  const [loadingVarieties, setLoadingVarieties] = useState(false);
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loadingWeather, setLoadingWeather] = useState(false);
   const [organizationRole, setOrganizationRole] =
@@ -115,6 +138,8 @@ export default function ProjectDetailPage() {
   const [projectLoadError, setProjectLoadError] = useState("");
 
   const [cropName, setCropName] = useState("");
+  const [cropCatalogId, setCropCatalogId] = useState<number | null>(null);
+  const [varietyCatalogId, setVarietyCatalogId] = useState<number | null>(null);
   const [cropVariety, setCropVariety] = useState("");
   const [cropVarietyError, setCropVarietyError] = useState("");
   const [sowingDate, setSowingDate] = useState("");
@@ -147,6 +172,57 @@ export default function ProjectDetailPage() {
     }
 
     setCropProfiles((data ?? []) as CropProfile[]);
+  }
+
+  async function loadCropCatalog() {
+    const { data, error } = await supabase
+      .from("crop_catalog")
+      .select(
+        "id, name, scientific_name, external_code, crop_profile_id"
+      )
+      .eq("source_system", "UKZUZ_OOS_CIS01D")
+      .eq("catalog_kind", "official_species")
+      .eq("active", true)
+      .eq("source_valid", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(
+        "CHYBA NAČTENÍ OFICIÁLNÍHO KATALOGU PLODIN:",
+        error
+      );
+      setCropCatalog([]);
+      return;
+    }
+
+    setCropCatalog((data ?? []) as CropCatalogItem[]);
+  }
+
+  async function loadVarietyCatalog(cropId: number) {
+    setLoadingVarieties(true);
+
+    const { data, error } = await supabase
+      .from("variety_catalog")
+      .select(
+        "id, crop_id, name, external_code, registration_status, registration_status_code, active"
+      )
+      .eq("source_system", "UKZUZ_OOS_CIS01D")
+      .eq("crop_id", cropId)
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(
+        "CHYBA NAČTENÍ OFICIÁLNÍHO KATALOGU ODRŮD:",
+        error
+      );
+      setVarietyCatalog([]);
+      setLoadingVarieties(false);
+      return;
+    }
+
+    setVarietyCatalog((data ?? []) as VarietyCatalogItem[]);
+    setLoadingVarieties(false);
   }
 
   async function loadCropStageProfiles() {
@@ -304,6 +380,8 @@ try {
 
 if (requestId !== loadRequestRef.current) return;
 
+    setCropCatalogId(currentProject.crop_catalog_id ?? null);
+    setVarietyCatalogId(currentProject.variety_catalog_id ?? null);
     setCropName(currentProject.crop_name ?? "");
     setCropVariety(currentProject.crop_variety ?? "");
     setSowingDate(currentProject.sowing_date ?? "");
@@ -474,10 +552,21 @@ useEffect(() => {
 
   void loadProject();
 
+  void loadCropCatalog();
   void loadCropProfiles();
   void loadCropStageProfiles();
 }, [loadProject]);
 /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (cropCatalogId == null) {
+      setVarietyCatalog([]);
+      setLoadingVarieties(false);
+      return;
+    }
+
+    void loadVarietyCatalog(cropCatalogId);
+  }, [cropCatalogId]);
 
   async function loadWeather(projectId: number) {
 
@@ -597,11 +686,33 @@ const soilMoisture =
   async function saveCropData() {
     if (!project) return;
 
-    if (!cropVariety.trim()) {
-    setCropVarietyError("ODRŮDA JE POVINNÁ");
-    setSavingCrop(false);
-    return;
-  }
+    const selectedCatalogCrop =
+      cropCatalog.find(
+        (item) => item.id === cropCatalogId
+      ) ?? null;
+
+    const selectedCatalogVariety =
+      varietyCatalog.find(
+        (item) => item.id === varietyCatalogId
+      ) ?? null;
+
+    if (cropCatalogId != null) {
+      if (!selectedCatalogVariety) {
+        setCropVarietyError("ODRŮDA JE POVINNÁ");
+        setSavingCrop(false);
+        return;
+      }
+
+      if (selectedCatalogVariety.crop_id !== cropCatalogId) {
+        setCropVarietyError("Vybraná odrůda nepatří k vybrané plodině.");
+        setSavingCrop(false);
+        return;
+      }
+    } else if (!cropVariety.trim()) {
+      setCropVarietyError("ODRŮDA JE POVINNÁ");
+      setSavingCrop(false);
+      return;
+    }
 
     setSavingCrop(true);
 
@@ -632,9 +743,14 @@ setAreaError("");
     const { data, error } = await supabase
       .from("projects")
       .update({
-        crop_name: cropName.trim() || null,
+        crop_catalog_id: cropCatalogId,
+        variety_catalog_id: selectedCatalogVariety?.id ?? null,
+        crop_name:
+          selectedCatalogCrop?.name ??
+          (cropName.trim() || null),
         crop_variety:
-          cropVariety.trim() || null,
+          selectedCatalogVariety?.name ??
+          (cropVariety.trim() || null),
         sowing_date:
           sowingDate || null,
         expected_harvest_date:
@@ -672,7 +788,13 @@ setAreaError("");
       return;
     }
 
-    setProject(data as Project);
+    const updatedProject = data as Project;
+    setProject(updatedProject);
+    setCropCatalogId(updatedProject.crop_catalog_id ?? null);
+    setVarietyCatalogId(updatedProject.variety_catalog_id ?? null);
+    setCropName(updatedProject.crop_name ?? "");
+    setCropVariety(updatedProject.crop_variety ?? "");
+    setCropVarietyError("");
     setSavingCrop(false);
   }
 
@@ -788,11 +910,23 @@ setAreaError("");
     );
   }
 
-  const selectedCropProfile =
-    cropProfiles.find(
-      (profile) =>
-        profile.name === cropName
+  const selectedCatalogCrop =
+    cropCatalog.find(
+      (item) => item.id === cropCatalogId
     ) ?? null;
+
+  const selectedCropProfile =
+    selectedCatalogCrop?.crop_profile_id != null
+      ? cropProfiles.find(
+          (profile) =>
+            profile.id === selectedCatalogCrop.crop_profile_id
+        ) ?? null
+      : cropCatalogId == null
+        ? cropProfiles.find(
+            (profile) =>
+              profile.name === cropName
+          ) ?? null
+        : null;
 
   const selectedCropStageProfile =
     selectedCropProfile && growthStage
@@ -924,6 +1058,15 @@ setAreaError("");
     analysisRecommendation.actions.length > 0
       ? analysisRecommendation.actions
       : contextEvaluation.actions;
+
+  const mainReasonFactor =
+    contextEvaluation.factors.find((factor) => factor.status === "Kritické") ??
+    contextEvaluation.factors.find((factor) => factor.status === "Upozornění") ??
+    null;
+
+  const mainReasonLabel = mainReasonFactor
+    ? `${mainReasonFactor.label}: ${mainReasonFactor.detail}`
+    : "Bez výrazného rizikového faktoru";
 
   const priorityClass =
     displayedPriority === "Kritická"
@@ -1083,7 +1226,19 @@ setAreaError("");
                 <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-100">◒ Aktuální stav vegetace</div>
                 <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-lg border border-slate-800 bg-[#061022]">
                   <div className="border-r border-slate-800 p-3"><div className="text-[8px] uppercase tracking-widest text-slate-500">NDVI</div><div className="mt-1 text-2xl font-black text-cyan-400">{currentNdvi != null ? currentNdvi.toFixed(3) : "—"}</div><div className={`text-[8px] ${latestNdviChangeClass}`}>{latestNdviChangeLabel} vs. předchozí</div></div>
-                  <div className="border-r border-slate-800 p-3"><div className="text-[8px] uppercase tracking-widest text-slate-500">Stav porostu</div><div className={`mt-1 text-lg font-black ${priorityClass}`}>{displayedLevel === "Bez vyhodnocení" ? "—" : displayedLevel}</div><div className="text-[8px] text-slate-500">AEGRIS hodnocení z dostupných dat</div></div>
+                  <div className="border-r border-slate-800 p-3">
+                    <div className="text-[8px] uppercase tracking-widest text-slate-500">
+                      Celkové hodnocení
+                    </div>
+                    <div className={`mt-1 text-lg font-black ${priorityClass}`}>
+                      {displayedLevel === "Bez vyhodnocení" ? "—" : displayedLevel}
+                    </div>
+                    <div className="mt-1 text-[8px] leading-relaxed text-slate-500">
+                      {displayedLevel === "Bez vyhodnocení"
+                        ? "Analýza zatím není k dispozici"
+                        : `Hlavní důvod: ${mainReasonLabel}`}
+                    </div>
+                  </div>
                   <div className="p-3"><div className="text-[8px] uppercase tracking-widest text-slate-500">AEGRIS RIZIKO</div><div className={`mt-1 text-lg font-black ${priorityClass}`}>{displayedLevel === "Bez vyhodnocení" ? "—" : contextEvaluation.scoreLevel}</div><div className="text-[8px] text-slate-500">Priorita {displayedPriority}</div></div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-slate-500">
@@ -1348,13 +1503,156 @@ setAreaError("");
           >
             <summary className="cursor-pointer list-none text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">EDITACE ÚDAJŮ O PLODINĚ</summary>
             <div className="mt-3 grid gap-3 lg:grid-cols-3">
-              <label className="text-[9px] text-slate-500">Pěstovaná plodina<select value={cropName} onChange={(event) => { const nextCrop = event.target.value; setCropName(nextCrop); const nextCropProfile = cropProfiles.find((profile) => profile.name === nextCrop) ?? null; const availableStages = nextCropProfile ? cropStageProfiles.filter((stageProfile) => stageProfile.crop_profile_id === nextCropProfile.id).map((stageProfile) => stageProfile.growth_stage) : []; if (!availableStages.includes(growthStage)) setGrowthStage(availableStages[0] ?? ""); }} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"><option value="">Vyberte plodinu</option>{cropProfiles.map((profile) => <option key={profile.id} value={profile.name}>{profile.name}</option>)}</select></label>
-              <label className="text-[9px] text-slate-500">Odrůda<input value={cropVariety} onChange={(event) => { setCropVariety(event.target.value); setCropVarietyError(""); }} className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white ${cropVarietyError ? "border-red-500" : "border-slate-700"}`} />{cropVarietyError && <span className="mt-1 block text-red-400">{cropVarietyError}</span>}</label>
+              <label className="text-[9px] text-slate-500">
+                Pěstovaná plodina
+                <select
+                  value={cropCatalogId != null ? String(cropCatalogId) : ""}
+                  onChange={(event) => {
+                    const nextCatalogId =
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value);
+
+                    const nextCatalogCrop =
+                      nextCatalogId != null
+                        ? cropCatalog.find(
+                            (item) => item.id === nextCatalogId
+                          ) ?? null
+                        : null;
+
+                    setCropCatalogId(nextCatalogId);
+                    setCropName(nextCatalogCrop?.name ?? "");
+                    setVarietyCatalogId(null);
+                    setCropVariety("");
+                    setCropVarietyError("");
+                    setVarietyCatalog([]);
+
+                    const nextCropProfile =
+                      nextCatalogCrop?.crop_profile_id != null
+                        ? cropProfiles.find(
+                            (profile) =>
+                              profile.id === nextCatalogCrop.crop_profile_id
+                          ) ?? null
+                        : null;
+
+                    const availableStages = nextCropProfile
+                      ? cropStageProfiles
+                          .filter(
+                            (stageProfile) =>
+                              stageProfile.crop_profile_id === nextCropProfile.id
+                          )
+                          .map(
+                            (stageProfile) => stageProfile.growth_stage
+                          )
+                      : [];
+
+                    if (!availableStages.includes(growthStage)) {
+                      setGrowthStage(availableStages[0] ?? "");
+                    }
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"
+                >
+                  <option value="">
+                    {cropCatalogId == null && cropName
+                      ? `Původní hodnota: ${cropName}`
+                      : "Vyberte plodinu z ÚKZÚZ"}
+                  </option>
+                  {cropCatalog.map((item) => (
+                    <option key={item.id} value={String(item.id)}>
+                      {item.name}
+                      {item.scientific_name
+                        ? ` — ${item.scientific_name}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+                {cropCatalogId != null &&
+                  selectedCatalogCrop &&
+                  selectedCatalogCrop.crop_profile_id == null && (
+                    <span className="mt-1 block text-[8px] text-amber-400">
+                      Pro tuto oficiální plodinu zatím není přiřazen agronomický profil.
+                    </span>
+                  )}
+              </label>
+              <label className="text-[9px] text-slate-500">
+                Odrůda
+                {cropCatalogId != null ? (
+                  <>
+                    <select
+                      value={
+                        varietyCatalogId != null
+                          ? String(varietyCatalogId)
+                          : ""
+                      }
+                      onChange={(event) => {
+                        const nextVarietyId =
+                          event.target.value === ""
+                            ? null
+                            : Number(event.target.value);
+
+                        const nextVariety =
+                          nextVarietyId != null
+                            ? varietyCatalog.find(
+                                (item) => item.id === nextVarietyId
+                              ) ?? null
+                            : null;
+
+                        setVarietyCatalogId(nextVarietyId);
+                        setCropVariety(nextVariety?.name ?? "");
+                        setCropVarietyError("");
+                      }}
+                      disabled={loadingVarieties}
+                      className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white disabled:opacity-50 ${
+                        cropVarietyError
+                          ? "border-red-500"
+                          : "border-slate-700"
+                      }`}
+                    >
+                      <option value="">
+                        {loadingVarieties
+                          ? "Načítám odrůdy ÚKZÚZ..."
+                          : varietyCatalog.length > 0
+                            ? "Vyberte odrůdu z ÚKZÚZ"
+                            : "Pro tuto plodinu nejsou dostupné aktivní odrůdy"}
+                      </option>
+                      {varietyCatalog.map((item) => (
+                        <option key={item.id} value={String(item.id)}>
+                          {item.name}
+                          {item.external_code
+                            ? ` — ${item.external_code}`
+                            : ""}
+                          {item.registration_status
+                            ? ` (${item.registration_status})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                ) : (
+                  <input
+                    value={cropVariety}
+                    onChange={(event) => {
+                      setCropVariety(event.target.value);
+                      setCropVarietyError("");
+                    }}
+                    className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white ${
+                      cropVarietyError
+                        ? "border-red-500"
+                        : "border-slate-700"
+                    }`}
+                  />
+                )}
+                {cropVarietyError && (
+                  <span className="mt-1 block text-red-400">
+                    {cropVarietyError}
+                  </span>
+                )}
+              </label>
               <label className="text-[9px] text-slate-500">Plocha (ha)<input type="number" value={areaHa} onChange={(event) => { setAreaHa(event.target.value); setAreaError(""); }} className={`mt-1 w-full rounded-lg border bg-[#061022] px-3 py-2 text-xs text-white ${areaError ? "border-red-500" : "border-slate-700"}`} />{areaError && <span className="mt-1 block text-red-400">{areaError}</span>}</label>
               <label className="text-[9px] text-slate-500">Způsob pěstování<select value={farmingMethod} onChange={(event) => setFarmingMethod(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white"><option value="">Vyberte</option><option value="Konvenční">Konvenční</option><option value="Integrované">Integrované</option><option value="Ekologické">Ekologické</option><option value="Jiné">Jiné</option></select></label>
               <label className="text-[9px] text-slate-500">Datum setí / výsadby<input type="date" value={sowingDate} onChange={(event) => setSowingDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label>
               <label className="text-[9px] text-slate-500">Předpokládaná sklizeň<input type="date" value={expectedHarvestDate} onChange={(event) => setExpectedHarvestDate(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white" /></label>
-              <label className="text-[9px] text-slate-500">Aktuální růstová fáze<select value={growthStage} onChange={(event) => setGrowthStage(event.target.value)} disabled={!cropName} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white disabled:opacity-50"><option value="">Vyberte růstovou fázi</option>{growthStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></label>
+              <label className="text-[9px] text-slate-500">Aktuální růstová fáze<select value={growthStage} onChange={(event) => setGrowthStage(event.target.value)} disabled={!selectedCropProfile} className="mt-1 w-full rounded-lg border border-slate-700 bg-[#061022] px-3 py-2 text-xs text-white disabled:opacity-50"><option value="">Vyberte růstovou fázi</option>{growthStages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></label>
               <div className="flex items-end"><button type="button" onClick={saveCropData} disabled={savingCrop} className="w-full rounded-lg bg-cyan-500 py-2.5 text-xs font-black text-slate-950 hover:bg-cyan-400 disabled:opacity-50">{savingCrop ? "Ukládám..." : "💾 Uložit údaje o plodině"}</button></div>
             </div>
           </details>

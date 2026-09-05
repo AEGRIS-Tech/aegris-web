@@ -334,7 +334,7 @@ export async function POST(request: Request) {
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select(
-        "id, latitude, longitude, boundary, user_id, organization_id, crop_name, growth_stage"
+        "id, latitude, longitude, boundary, user_id, organization_id, crop_catalog_id, crop_name, growth_stage"
       )
       .eq("id", projectId)
       .maybeSingle();
@@ -943,21 +943,118 @@ export async function POST(request: Request) {
     // SERVER-AUTHORITATIVE AEGRIS PERSISTENCE
     // ---------------------------------------------------------
     const analysisCreatedAt = new Date().toISOString();
-    const cropName = typeof project.crop_name === "string" ? project.crop_name : "";
-    const growthStage = typeof project.growth_stage === "string" ? project.growth_stage : "";
+    const cropName =
+      typeof project.crop_name === "string"
+        ? project.crop_name
+        : "";
+    const growthStage =
+      typeof project.growth_stage === "string"
+        ? project.growth_stage
+        : "";
 
-    const [cropResult, soilResult] = await Promise.all([
-      cropName
-        ? serviceSupabase.from("crop_profiles").select("*").eq("name", cropName).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      serviceSupabase.from("project_soil_profiles").select("*").eq("project_id", projectId).maybeSingle(),
-    ]);
+    const cropCatalogId =
+      typeof project.crop_catalog_id === "number"
+        ? project.crop_catalog_id
+        : null;
 
-    if (cropResult.error) console.error("ANALYSIS CROP PROFILE ERROR:", cropResult.error);
-    if (soilResult.error) console.error("ANALYSIS SOIL PROFILE ERROR:", soilResult.error);
+    let cropProfile: CropProfile | null = null;
 
-    const cropProfile = (cropResult.data ?? null) as CropProfile | null;
-    const soilProfile = (soilResult.data ?? null) as ProjectSoilProfile | null;
+    /*
+     * Nové projekty používají autoritativní vazbu:
+     * projects.crop_catalog_id
+     *   -> crop_catalog.crop_profile_id
+     *   -> crop_profiles.id
+     *
+     * Pokud katalogová položka agronomický profil nemá,
+     * profil z názvu záměrně nedohledáváme.
+     */
+    if (cropCatalogId != null) {
+      const {
+        data: catalogCrop,
+        error: catalogCropError,
+      } = await serviceSupabase
+        .from("crop_catalog")
+        .select("id, crop_profile_id")
+        .eq("id", cropCatalogId)
+        .maybeSingle();
+
+      if (catalogCropError) {
+        console.error(
+          "ANALYSIS CROP CATALOG ERROR:",
+          catalogCropError
+        );
+      } else if (!catalogCrop) {
+        console.error(
+          "ANALYSIS CROP CATALOG ITEM NOT FOUND:",
+          {
+            projectId,
+            cropCatalogId,
+          }
+        );
+      } else if (catalogCrop.crop_profile_id != null) {
+        const {
+          data: profileData,
+          error: profileError,
+        } = await serviceSupabase
+          .from("crop_profiles")
+          .select("*")
+          .eq("id", catalogCrop.crop_profile_id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error(
+            "ANALYSIS CROP PROFILE ERROR:",
+            profileError
+          );
+        }
+
+        cropProfile =
+          (profileData ?? null) as CropProfile | null;
+      }
+    } else if (cropName) {
+      /*
+       * Backwards compatibility pro staré projekty,
+       * které ještě crop_catalog_id nemají.
+       */
+      const {
+        data: profileData,
+        error: profileError,
+      } = await serviceSupabase
+        .from("crop_profiles")
+        .select("*")
+        .eq("name", cropName)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "ANALYSIS LEGACY CROP PROFILE ERROR:",
+          profileError
+        );
+      }
+
+      cropProfile =
+        (profileData ?? null) as CropProfile | null;
+    }
+
+    const {
+      data: soilProfileData,
+      error: soilProfileError,
+    } = await serviceSupabase
+      .from("project_soil_profiles")
+      .select("*")
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (soilProfileError) {
+      console.error(
+        "ANALYSIS SOIL PROFILE ERROR:",
+        soilProfileError
+      );
+    }
+
+    const soilProfile =
+      (soilProfileData ?? null) as ProjectSoilProfile | null;
+
     let cropStageProfile: CropStageProfile | null = null;
 
     if (cropProfile && growthStage) {
@@ -1011,6 +1108,7 @@ export async function POST(request: Request) {
     const inputSnapshot = {
       captured_at: analysisCreatedAt,
       current_ndvi: currentNdvi,
+      crop_catalog_id: cropCatalogId,
       crop_name: cropName || null,
       growth_stage: growthStage || null,
       crop_profile: cropProfile,
