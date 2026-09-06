@@ -36,7 +36,7 @@ function getBearerToken(request: Request): string | null {
   return token;
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
     /*
      * --------------------------------------------------
@@ -46,19 +46,19 @@ export async function POST(request: Request) {
      * být veřejně spustitelný bez serverového tajemství.
      *
      * Očekává:
-     * Authorization: Bearer <ANALYSIS_SCHEDULE_SECRET>
+     * Authorization: Bearer <CRON_SECRET>
      * --------------------------------------------------
      */
 
-    const scheduleSecret = process.env.ANALYSIS_SCHEDULE_SECRET;
+    const scheduleSecret = process.env.CRON_SECRET;
 
     if (!scheduleSecret) {
-      console.error("CHYBÍ ANALYSIS_SCHEDULE_SECRET");
+      console.error("CHYBÍ CRON_SECRET");
       return NextResponse.json(
         {
           error:
             "Server nemá nakonfigurovaný secret pro automatické analýzy.",
-          code: "ANALYSIS_SCHEDULE_SECRET_MISSING",
+          code: "CRON_SECRET_MISSING",
         },
         { status: 500 }
       );
