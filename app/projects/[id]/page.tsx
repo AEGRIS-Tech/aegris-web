@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -1250,7 +1250,7 @@ setAreaError("");
                   )}
                 </div>
                 {organizationRole !== "viewer" ? (
-                  <button type="button" onClick={runAnalysis} disabled={runningAnalysis} className="mt-3 w-full rounded-lg bg-cyan-500 py-2.5 text-xs font-black text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">{runningAnalysis ? "🤖 Analyzuji..." : "🤖 Spustit AI analýzu"}</button>
+                  <button type="button" onClick={runAnalysis} disabled={runningAnalysis} className="mt-3 w-full rounded-lg bg-cyan-500 py-2.5 text-xs font-black text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">{runningAnalysis ? "🧠 Analyzuji..." : "🧠 Spustit AI analýzu"}</button>
                 ) : (
                   <div className="mt-3 rounded-lg border border-slate-800 bg-[#061022] py-2.5 text-center text-[9px] font-bold text-slate-500">
                     Viewer má přístup pouze pro čtení.
@@ -1259,13 +1259,45 @@ setAreaError("");
               </div>
               <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-800 bg-[#061022]">
                 <div className="flex flex-col items-center justify-center border-r border-slate-800 p-3 text-center">
-                  <div className="text-[8px] uppercase tracking-widest text-slate-500">Kontextové vyhodnocení</div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
+                    Kontextové hodnocení
+                  </div>
                   <div className="relative mt-3 flex h-24 w-24 items-center justify-center rounded-full border-[8px] border-slate-800">
-                    <div className="absolute inset-[-8px] rounded-full border-[8px] border-transparent border-t-cyan-400 border-r-cyan-400" />
-                    <div><div className="text-xl font-black text-amber-400">{displayedScore} / 100</div><div className="text-[8px] text-slate-400">AEGRIS skóre · {contextEvaluation.scoreLevel}</div></div>
+                    <div className="absolute inset-[-8px] rounded-full border-[8px] border-transparent border-r-cyan-400 border-t-cyan-400" />
+                    <div className="relative text-center">
+                      <div className="text-3xl font-black leading-none text-amber-400">
+                        {displayedScore}
+                      </div>
+                      <div className="mt-1 text-[9px] font-bold text-slate-500">
+                        / 100
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 text-[9px] font-black text-amber-400">
+                    {contextEvaluation.scoreLevel}
+                  </div>
+                  <div className="mt-1 text-[8px] text-slate-500">
+                    AEGRIS kontextové skóre
                   </div>
                 </div>
-                <div className="flex flex-col items-center justify-center p-3 text-center"><div className="text-[8px] uppercase tracking-widest text-slate-500">Kritické faktory</div><div className="mt-3 text-2xl font-black text-red-400">{contextEvaluation.criticalFactorCount}</div><div className="text-[8px] text-slate-500">z {contextEvaluation.evaluatedFactorCount}</div><div className="mt-2 text-[8px] font-bold text-cyan-400">Data: {contextEvaluation.dataCompletenessPct}%</div></div>
+
+                <div className="flex flex-col items-center justify-center p-3 text-center">
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-slate-500">
+                    Kritické faktory
+                  </div>
+                  <div className="mt-3 text-3xl font-black leading-none text-red-400">
+                    {contextEvaluation.criticalFactorCount}
+                  </div>
+                  <div className="mt-1 text-[9px] font-bold text-slate-500">
+                    z {contextEvaluation.evaluatedFactorCount}
+                  </div>
+                  <div className="mt-2 text-[8px] text-slate-500">
+                    kritických faktorů
+                  </div>
+                  <div className="mt-3 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5 text-[8px] font-bold text-cyan-400">
+                    Datová jistota {contextEvaluation.dataCompletenessPct} %
+                  </div>
+                </div>
               </div>
             </div>
           </div>
