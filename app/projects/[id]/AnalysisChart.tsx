@@ -61,23 +61,23 @@ const scrollbarStyles = `
   }
 
   .aegris-ndvi-scroll::-webkit-scrollbar-track {
-    background: #061022;
+    background: #050b10;
     border-radius: 9999px;
   }
 
   .aegris-ndvi-scroll::-webkit-scrollbar-thumb {
-    background: rgba(6, 182, 212, 0.35);
+    background: rgba(34, 211, 238, 0.28);
     border-radius: 9999px;
-    border: 1px solid rgba(6, 182, 212, 0.12);
+    border: 1px solid rgba(34, 211, 238, 0.10);
   }
 
   .aegris-ndvi-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(6, 182, 212, 0.65);
+    background: rgba(34, 211, 238, 0.50);
   }
 
   .aegris-ndvi-scroll {
     scrollbar-width: thin;
-    scrollbar-color: rgba(6, 182, 212, 0.45) #061022;
+    scrollbar-color: rgba(34, 211, 238, 0.34) #050b10;
   }
 `;
 
@@ -107,7 +107,7 @@ export default function AnalysisChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-slate-800 bg-[#061022]">
+      <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-white/[0.07] bg-[#071017]">
         <div className="text-center">
           <div className="text-xs font-bold text-slate-400">
             Zatím nejsou k dispozici data NDVI
@@ -213,7 +213,7 @@ export default function AnalysisChart({
     <div className="flex h-full min-h-[280px] w-full flex-col">
       <style>{scrollbarStyles}</style>
 
-      <div className="aegris-ndvi-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-slate-800 bg-[#061022]">
+      <div className="aegris-ndvi-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-white/[0.07] bg-[#071017]">
         <div
           style={{
             width: `${chartWidth}px`,
@@ -243,7 +243,7 @@ export default function AnalysisChart({
                       }
                       y1={y}
                       y2={y}
-                      stroke="#1e293b"
+                      stroke="#1a232d"
                       strokeWidth="1"
                     />
 
@@ -300,7 +300,7 @@ export default function AnalysisChart({
                 height -
                 padding.bottom
               }
-              stroke="#334155"
+              stroke="#28333e"
               strokeWidth="1"
             />
 
@@ -324,7 +324,7 @@ export default function AnalysisChart({
                   cy={point.y}
                   r="5"
                   fill="#06b6d4"
-                  stroke="#071225"
+                  stroke="#071017"
                   strokeWidth="3"
                 >
                   <title>

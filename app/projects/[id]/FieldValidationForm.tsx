@@ -287,12 +287,12 @@ export default function FieldValidationForm({
 
   if (loading) {
     return (
-      <section className="mt-3 rounded-xl border border-slate-800 bg-[#071225]/95 p-4">
-        <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">
+      <section className="mt-3 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4">
+        <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
           Ověření agronomem
         </div>
 
-        <div className="mt-3 rounded-lg border border-slate-800 bg-[#061022] p-4 text-[10px] text-slate-500">
+        <div className="mt-3 rounded-lg border border-white/[0.07] bg-[#071017] p-4 text-[10px] text-slate-500">
           Načítám terénní ověření…
         </div>
       </section>
@@ -300,10 +300,10 @@ export default function FieldValidationForm({
   }
 
   return (
-    <section className="mt-3 rounded-xl border border-slate-800 bg-[#071225]/95 p-4">
+    <section className="mt-3 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-400">
+          <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
             Ground Truth
           </div>
 
@@ -329,7 +329,7 @@ export default function FieldValidationForm({
       </div>
 
       {readOnly && (
-        <div className="mt-3 rounded-lg border border-slate-800 bg-[#061022] px-3 py-2 text-[9px] text-slate-500">
+        <div className="mt-3 rounded-lg border border-white/[0.07] bg-[#071017] px-3 py-2 text-[9px] text-slate-500">
           Viewer má k terénnímu ověření pouze přístup
           pro čtení.
         </div>
@@ -361,7 +361,7 @@ export default function FieldValidationForm({
                           "partially_confirmed"
                         ? "border-amber-400/50 bg-amber-500/10 text-amber-300"
                         : "border-red-400/50 bg-red-500/10 text-red-300"
-                    : "border-slate-800 bg-[#061022] text-slate-400 hover:border-cyan-400/40"
+                    : "border-white/[0.07] bg-[#071017] text-slate-400 hover:border-cyan-300/30"
                 } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 <div className="flex items-center gap-2">
@@ -397,7 +397,7 @@ export default function FieldValidationForm({
                 event.target.value as ActualCause | ""
               )
             }
-            className="mt-2 w-full rounded-lg border border-slate-800 bg-[#061022] px-3 py-2.5 text-[10px] text-slate-200 outline-none transition focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 w-full rounded-lg border border-white/[0.07] bg-[#071017] px-3 py-2.5 text-[10px] text-slate-200 outline-none transition focus:border-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="">
               Nevybráno
@@ -430,7 +430,7 @@ export default function FieldValidationForm({
             onChange={(event) =>
               setObservedAt(event.target.value)
             }
-            className="mt-2 w-full rounded-lg border border-slate-800 bg-[#061022] px-3 py-2.5 text-[10px] text-slate-200 outline-none transition focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 w-full rounded-lg border border-white/[0.07] bg-[#071017] px-3 py-2.5 text-[10px] text-slate-200 outline-none transition focus:border-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
       </div>
@@ -453,7 +453,7 @@ export default function FieldValidationForm({
             setNote(event.target.value)
           }
           placeholder="Např. projevy stresu v jižní části pozemku, lokálně poškozené rostliny, bez známek choroby…"
-          className="mt-2 w-full resize-y rounded-lg border border-slate-800 bg-[#061022] px-3 py-2.5 text-[10px] leading-4 text-slate-200 outline-none transition placeholder:text-slate-700 focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-2 w-full resize-y rounded-lg border border-white/[0.07] bg-[#071017] px-3 py-2.5 text-[10px] leading-4 text-slate-200 outline-none transition placeholder:text-slate-700 focus:border-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-60"
         />
 
         <div className="mt-1 text-right text-[8px] text-slate-600">
@@ -496,7 +496,7 @@ export default function FieldValidationForm({
               !observedAt
             }
             onClick={saveValidation}
-            className="rounded-lg bg-cyan-500 px-4 py-2.5 text-[9px] font-black text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-cyan-300 px-4 py-2.5 text-[9px] font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving
               ? "Ukládám…"
