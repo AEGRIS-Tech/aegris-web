@@ -45,9 +45,25 @@ type AlertRow = {
   created_at: string;
 };
 
+type FieldValidationRow = {
+  id: number;
+  project_id: number;
+  analysis_id: number;
+  validation_result:
+    | "confirmed"
+    | "partially_confirmed"
+    | "not_confirmed";
+  actual_cause: string | null;
+  observed_at: string;
+  validated_by: string;
+  updated_at: string;
+};
+
 export async function GET() {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
     const publishableKey =
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -71,15 +87,21 @@ export async function GET() {
           getAll() {
             return cookieStore.getAll();
           },
+
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(
                 ({ name, value, options }) => {
-                  cookieStore.set(name, value, options);
+                  cookieStore.set(
+                    name,
+                    value,
+                    options
+                  );
                 }
               );
             } catch {
-              // Pro read-only dashboard request není refresh cookies kritický.
+              // Pro read-only dashboard request není
+              // refresh cookies kritický.
             }
           },
         },
@@ -152,8 +174,13 @@ export async function GET() {
       .select(
         "id, name, latitude, longitude, status, created_at"
       )
-      .eq("organization_id", activeOrganizationId)
-      .order("created_at", { ascending: false });
+      .eq(
+        "organization_id",
+        activeOrganizationId
+      )
+      .order("created_at", {
+        ascending: false,
+      });
 
     if (projectsError) {
       console.error(
@@ -162,13 +189,17 @@ export async function GET() {
       );
 
       return NextResponse.json(
-        { error: "Nepodařilo se načíst projekty." },
+        {
+          error:
+            "Nepodařilo se načíst projekty.",
+        },
         { status: 500 }
       );
     }
 
     const projects =
-      (projectsData ?? []) as DashboardProjectRow[];
+      (projectsData ??
+        []) as DashboardProjectRow[];
 
     if (projects.length === 0) {
       return NextResponse.json({
@@ -179,19 +210,23 @@ export async function GET() {
           alerts: 0,
           unreadAlerts: 0,
           criticalProjects: 0,
+          pendingFieldValidations: 0,
         },
+
         projects: [],
         latestAnalysis: null,
       });
     }
 
-    const projectIds =
-      projects.map((project) => project.id);
+    const projectIds = projects.map(
+      (project) => project.id
+    );
 
     const [
       analysesResult,
       recommendationsResult,
       alertsResult,
+      validationsResult,
     ] = await Promise.all([
       authSupabase
         .from("analysis")
@@ -199,7 +234,9 @@ export async function GET() {
           "id, project_id, ndvi, risk, created_at, valid_geometry_pct, source_provider, satellite_product"
         )
         .in("project_id", projectIds)
-        .order("created_at", { ascending: false }),
+        .order("created_at", {
+          ascending: false,
+        }),
 
       authSupabase
         .from("aegris_recommendations")
@@ -207,7 +244,9 @@ export async function GET() {
           "id, project_id, analysis_id, priority, score, created_at"
         )
         .in("project_id", projectIds)
-        .order("created_at", { ascending: false }),
+        .order("created_at", {
+          ascending: false,
+        }),
 
       authSupabase
         .from("aegris_alerts")
@@ -215,7 +254,19 @@ export async function GET() {
           "id, project_id, analysis_id, level, priority, title, is_read, created_at"
         )
         .in("project_id", projectIds)
-        .order("created_at", { ascending: false }),
+        .order("created_at", {
+          ascending: false,
+        }),
+
+      authSupabase
+        .from("field_validations")
+        .select(
+          "id, project_id, analysis_id, validation_result, actual_cause, observed_at, validated_by, updated_at"
+        )
+        .in("project_id", projectIds)
+        .order("updated_at", {
+          ascending: false,
+        }),
     ]);
 
     if (analysesResult.error) {
@@ -239,15 +290,28 @@ export async function GET() {
       );
     }
 
+    if (validationsResult.error) {
+      console.error(
+        "DASHBOARD FIELD VALIDATIONS ERROR:",
+        validationsResult.error
+      );
+    }
+
     const analyses =
-      (analysesResult.data ?? []) as AnalysisRow[];
+      (analysesResult.data ??
+        []) as AnalysisRow[];
 
     const recommendations =
       (recommendationsResult.data ??
         []) as RecommendationRow[];
 
     const alerts =
-      (alertsResult.data ?? []) as AlertRow[];
+      (alertsResult.data ??
+        []) as AlertRow[];
+
+    const validations =
+      (validationsResult.data ??
+        []) as FieldValidationRow[];
 
     const latestAnalysisByProject =
       new Map<number, AnalysisRow>();
@@ -261,6 +325,29 @@ export async function GET() {
         latestAnalysisByProject.set(
           analysis.project_id,
           analysis
+        );
+      }
+    }
+
+    /*
+     * Recommendation vážeme primárně na konkrétní
+     * analysis_id. Tím se vyhneme tomu, že by dashboard
+     * spojil poslední analýzu se starším/novějším
+     * recommendation snapshotem stejného projektu.
+     */
+    const recommendationByAnalysis =
+      new Map<number, RecommendationRow>();
+
+    for (const recommendation of recommendations) {
+      if (
+        recommendation.analysis_id != null &&
+        !recommendationByAnalysis.has(
+          recommendation.analysis_id
+        )
+      ) {
+        recommendationByAnalysis.set(
+          recommendation.analysis_id,
+          recommendation
         );
       }
     }
@@ -298,15 +385,54 @@ export async function GET() {
       }
     }
 
+    /*
+     * Ground Truth je autoritativně vázán na
+     * immutable analysis_id.
+     *
+     * Pro dashboard nás zajímá, zda poslední analýza
+     * projektu už má alespoň jedno terénní ověření,
+     * které je přihlášenému uživateli dostupné přes RLS.
+     */
+    const validationByAnalysis =
+      new Map<number, FieldValidationRow>();
+
+    for (const validation of validations) {
+      if (
+        !validationByAnalysis.has(
+          validation.analysis_id
+        )
+      ) {
+        validationByAnalysis.set(
+          validation.analysis_id,
+          validation
+        );
+      }
+    }
+
     const dashboardProjects =
       projects.map((project) => {
         const latestAnalysis =
-          latestAnalysisByProject.get(project.id) ?? null;
-
-        const latestRecommendation =
-          latestRecommendationByProject.get(
+          latestAnalysisByProject.get(
             project.id
           ) ?? null;
+
+        const latestRecommendation =
+          latestAnalysis != null
+            ? recommendationByAnalysis.get(
+                latestAnalysis.id
+              ) ??
+              latestRecommendationByProject.get(
+                project.id
+              ) ??
+              null
+            : null;
+
+        const latestFieldValidation =
+          latestAnalysis != null
+            ? validationByAnalysis.get(
+                latestAnalysis.id
+              ) ?? null
+            : null;
 
         const ndvi =
           latestAnalysis != null
@@ -314,7 +440,8 @@ export async function GET() {
             : null;
 
         const validGeometryPct =
-          latestAnalysis?.valid_geometry_pct != null
+          latestAnalysis
+            ?.valid_geometry_pct != null
             ? Number(
                 latestAnalysis.valid_geometry_pct
               )
@@ -327,21 +454,28 @@ export async function GET() {
             latestAnalysis != null
               ? {
                   id: latestAnalysis.id,
+
                   ndvi:
                     Number.isFinite(ndvi)
                       ? ndvi
                       : null,
-                  risk: latestAnalysis.risk,
+
+                  risk:
+                    latestAnalysis.risk,
+
                   created_at:
                     latestAnalysis.created_at,
+
                   valid_geometry_pct:
                     Number.isFinite(
                       validGeometryPct
                     )
                       ? validGeometryPct
                       : null,
+
                   source_provider:
                     latestAnalysis.source_provider,
+
                   satellite_product:
                     latestAnalysis.satellite_product,
                 }
@@ -350,15 +484,46 @@ export async function GET() {
           latestRecommendation:
             latestRecommendation != null
               ? {
-                  id: latestRecommendation.id,
+                  id:
+                    latestRecommendation.id,
+
                   analysis_id:
                     latestRecommendation.analysis_id,
+
                   priority:
                     latestRecommendation.priority,
+
                   score:
                     latestRecommendation.score,
+
                   created_at:
                     latestRecommendation.created_at,
+                }
+              : null,
+
+          latestFieldValidation:
+            latestFieldValidation != null
+              ? {
+                  id:
+                    latestFieldValidation.id,
+
+                  analysis_id:
+                    latestFieldValidation.analysis_id,
+
+                  validation_result:
+                    latestFieldValidation.validation_result,
+
+                  actual_cause:
+                    latestFieldValidation.actual_cause,
+
+                  observed_at:
+                    latestFieldValidation.observed_at,
+
+                  validated_by:
+                    latestFieldValidation.validated_by,
+
+                  updated_at:
+                    latestFieldValidation.updated_at,
                 }
               : null,
 
@@ -374,14 +539,23 @@ export async function GET() {
 
     for (const project of dashboardProjects) {
       if (
-        project.latestRecommendation?.priority ===
-          "Kritická" ||
+        project.latestRecommendation
+          ?.priority === "Kritická" ||
         project.latestAnalysis?.risk ===
           "Kritické"
       ) {
-        criticalProjectIds.add(project.id);
+        criticalProjectIds.add(
+          project.id
+        );
       }
     }
+
+    const pendingFieldValidations =
+      dashboardProjects.filter(
+        (project) =>
+          project.latestAnalysis != null &&
+          project.latestFieldValidation == null
+      ).length;
 
     const latestAnalysis =
       analyses.length > 0
@@ -390,9 +564,8 @@ export async function GET() {
 
     const latestRecommendation =
       latestAnalysis != null
-        ? recommendations.find(
-            (item) =>
-              item.analysis_id === latestAnalysis.id
+        ? recommendationByAnalysis.get(
+            latestAnalysis.id
           ) ??
           latestRecommendationByProject.get(
             latestAnalysis.project_id
@@ -412,10 +585,12 @@ export async function GET() {
     return NextResponse.json({
       counts: {
         projects: projects.length,
+
         analyses: analyses.length,
 
-        // Každý projekt s alespoň jednou uloženou analýzou
-        // má v pilotní verzi dostupný report.
+        // Každý projekt s alespoň jednou
+        // uloženou analýzou má v pilotní
+        // verzi dostupný report.
         reports:
           latestAnalysisByProject.size,
 
@@ -429,6 +604,8 @@ export async function GET() {
 
         criticalProjects:
           criticalProjectIds.size,
+
+        pendingFieldValidations,
       },
 
       projects: dashboardProjects,
@@ -439,17 +616,22 @@ export async function GET() {
               project:
                 latestProject != null
                   ? {
-                      id: latestProject.id,
-                      name: latestProject.name,
+                      id:
+                        latestProject.id,
+
+                      name:
+                        latestProject.name,
                     }
                   : null,
 
               analysis: {
-                id: latestAnalysis.id,
+                id:
+                  latestAnalysis.id,
 
-                ndvi: Number(
-                  latestAnalysis.ndvi
-                ),
+                ndvi:
+                  Number(
+                    latestAnalysis.ndvi
+                  ),
 
                 risk:
                   latestAnalysis.risk,
@@ -458,8 +640,8 @@ export async function GET() {
                   latestAnalysis.created_at,
 
                 valid_geometry_pct:
-                  latestAnalysis.valid_geometry_pct !=
-                  null
+                  latestAnalysis
+                    .valid_geometry_pct != null
                     ? Number(
                         latestAnalysis.valid_geometry_pct
                       )
@@ -477,6 +659,7 @@ export async function GET() {
                   ? {
                       priority:
                         latestRecommendation.priority,
+
                       score:
                         latestRecommendation.score,
                     }

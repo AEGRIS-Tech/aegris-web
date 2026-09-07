@@ -45,10 +45,17 @@ type DashboardCounts = {
   alerts: number;
   unreadAlerts: number;
   criticalProjects: number;
+  pendingFieldValidations: number;
 };
+
+type FieldValidationResult =
+  | "confirmed"
+  | "partially_confirmed"
+  | "not_confirmed";
 
 type DashboardProject = Project & {
   latestAnalysis: AnalysisResult | null;
+
   latestRecommendation: {
     id: number;
     analysis_id: number | null;
@@ -56,6 +63,17 @@ type DashboardProject = Project & {
     score: number | null;
     created_at: string;
   } | null;
+
+  latestFieldValidation: {
+    id: number;
+    analysis_id: number;
+    validation_result: FieldValidationResult;
+    actual_cause: string | null;
+    observed_at: string;
+    validated_by: string;
+    updated_at: string;
+  } | null;
+
   unreadAlerts: number;
 };
 
@@ -63,8 +81,10 @@ export default function DashboardPage() {
   const router = useRouter();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [, setDashboardProjects] =
+
+  const [dashboardProjects, setDashboardProjects] =
     useState<DashboardProject[]>([]);
+
   const [dashboardCounts, setDashboardCounts] =
     useState<DashboardCounts>({
       projects: 0,
@@ -73,14 +93,18 @@ export default function DashboardPage() {
       alerts: 0,
       unreadAlerts: 0,
       criticalProjects: 0,
+      pendingFieldValidations: 0,
     });
+
   const [user, setUser] = useState<User | null>(null);
+
   const [activeOrganizationId, setActiveOrganizationId] =
     useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
+
   const [editingProject, setEditingProject] =
     useState<Project | null>(null);
 
@@ -89,12 +113,13 @@ export default function DashboardPage() {
     longitude: 0,
   });
 
-  const [selectedProject, setSelectedProject] = useState<Project>({
-    name: "No project selected",
-    latitude: 0,
-    longitude: 0,
-    status: "Waiting",
-  });
+  const [selectedProject, setSelectedProject] =
+    useState<Project>({
+      name: "No project selected",
+      latitude: 0,
+      longitude: 0,
+      status: "Waiting",
+    });
 
   const [analysis, setAnalysis] =
     useState<AnalysisResult | null>(null);
@@ -121,13 +146,17 @@ export default function DashboardPage() {
       }
 
       setDashboardCounts(result.counts);
+
       setDashboardProjects(
         Array.isArray(result.projects)
           ? result.projects
           : []
       );
     } catch (error) {
-      console.error("CHYBA NAČTENÍ DASHBOARDU:", error);
+      console.error(
+        "CHYBA NAČTENÍ DASHBOARDU:",
+        error
+      );
     }
   }, []);
 
@@ -144,26 +173,34 @@ export default function DashboardPage() {
         const result = await response.json();
 
         if (!response.ok) {
-          console.error("CHYBA DASHBOARD API:", result);
+          console.error(
+            "CHYBA DASHBOARD API:",
+            result
+          );
+
           setAnalysis(null);
           return;
         }
 
         setDashboardCounts(result.counts);
+
         setDashboardProjects(
           Array.isArray(result.projects)
             ? result.projects
             : []
         );
 
-        const projectData = Array.isArray(result.projects)
-          ? result.projects.find(
-              (item: DashboardProject) =>
-                item.id === projectId
-            )
-          : null;
+        const projectData =
+          Array.isArray(result.projects)
+            ? result.projects.find(
+                (item: DashboardProject) =>
+                  item.id === projectId
+              )
+            : null;
 
-        const latest = projectData?.latestAnalysis ?? null;
+        const latest =
+          projectData?.latestAnalysis ?? null;
+
         const recommendation =
           projectData?.latestRecommendation ?? null;
 
@@ -174,11 +211,17 @@ export default function DashboardPage() {
 
         setAnalysis({
           ...latest,
-          score: recommendation?.score ?? null,
-          priority: recommendation?.priority ?? null,
+          score:
+            recommendation?.score ?? null,
+          priority:
+            recommendation?.priority ?? null,
         });
       } catch (error) {
-        console.error("CHYBA NAČTENÍ ANALÝZY:", error);
+        console.error(
+          "CHYBA NAČTENÍ ANALÝZY:",
+          error
+        );
+
         setAnalysis(null);
       }
     },
@@ -194,7 +237,10 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from("projects")
         .select("*")
-        .eq("organization_id", organizationId)
+        .eq(
+          "organization_id",
+          organizationId
+        )
         .order("created_at", {
           ascending: false,
         });
@@ -211,11 +257,13 @@ export default function DashboardPage() {
         (data as Project[]) ?? [];
 
       setProjects(loadedProjects);
+
       await loadDashboardSummary();
 
       // Automaticky vyber nejnovější projekt
       if (loadedProjects.length > 0) {
-        const firstProject = loadedProjects[0];
+        const firstProject =
+          loadedProjects[0];
 
         setSelectedProject(firstProject);
 
@@ -226,7 +274,10 @@ export default function DashboardPage() {
         }
       }
     },
-    [loadDashboardSummary, loadLatestAnalysis]
+    [
+      loadDashboardSummary,
+      loadLatestAnalysis,
+    ]
   );
 
   // =========================================================
@@ -244,18 +295,23 @@ export default function DashboardPage() {
         return;
       }
 
-      const { data: profile, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("account_type, demo_expires_at, active_organization_id")
-          .eq("id", user.id)
-          .maybeSingle();
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("profiles")
+        .select(
+          "account_type, demo_expires_at, active_organization_id"
+        )
+        .eq("id", user.id)
+        .maybeSingle();
 
       if (profileError) {
         console.error(
           "CHYBA NAČTENÍ PROFILU:",
           profileError
         );
+
         router.push("/login");
         return;
       }
@@ -263,24 +319,34 @@ export default function DashboardPage() {
       if (
         profile?.account_type === "demo" &&
         profile.demo_expires_at &&
-        new Date(profile.demo_expires_at) <= new Date()
+        new Date(
+          profile.demo_expires_at
+        ) <= new Date()
       ) {
         router.push("/login");
         return;
       }
 
-      if (!profile?.active_organization_id) {
+      if (
+        !profile?.active_organization_id
+      ) {
         console.error(
           "CHYBA: Uživatel nemá nastavenou aktivní organizaci."
         );
+
         router.push("/login");
         return;
       }
 
-      setActiveOrganizationId(profile.active_organization_id);
+      setActiveOrganizationId(
+        profile.active_organization_id
+      );
+
       setUser(user);
 
-      await loadProjects(profile.active_organization_id);
+      await loadProjects(
+        profile.active_organization_id
+      );
     }
 
     init();
@@ -292,24 +358,32 @@ export default function DashboardPage() {
 
   function openSelectedProjectAnalysis() {
     if (!selectedProject.id) {
-      setAnalysisError("Není vybrán žádný projekt.");
+      setAnalysisError(
+        "Není vybrán žádný projekt."
+      );
       return;
     }
 
-    router.push(`/projects/${selectedProject.id}`);
+    router.push(
+      `/projects/${selectedProject.id}`
+    );
   }
 
   // =========================================================
   // SELECT PROJECT
   // =========================================================
 
-  async function selectProject(project: Project) {
+  async function selectProject(
+    project: Project
+  ) {
     setSelectedProject(project);
     setAnalysis(null);
     setAnalysisError("");
 
     if (project.id) {
-      await loadLatestAnalysis(project.id);
+      await loadLatestAnalysis(
+        project.id
+      );
     }
   }
 
@@ -349,8 +423,13 @@ export default function DashboardPage() {
   // EDIT PROJECT
   // =========================================================
 
-  function openEditProjectModal(project: Project) {
-    setEditingProject({ ...project });
+  function openEditProjectModal(
+    project: Project
+  ) {
+    setEditingProject({
+      ...project,
+    });
+
     setEditModalOpen(true);
   }
 
@@ -359,29 +438,42 @@ export default function DashboardPage() {
       return;
     }
 
-    const latitude = Number(editingProject.latitude);
-    const longitude = Number(editingProject.longitude);
+    const latitude = Number(
+      editingProject.latitude
+    );
+
+    const longitude = Number(
+      editingProject.longitude
+    );
 
     if (
       !editingProject.name.trim() ||
       !Number.isFinite(latitude) ||
       !Number.isFinite(longitude)
     ) {
-      console.error("NEPLATNÉ ÚDAJE PROJEKTU");
+      console.error(
+        "NEPLATNÉ ÚDAJE PROJEKTU"
+      );
       return;
     }
 
-    const { data, error } = await supabase
-      .from("projects")
-      .update({
-        name: editingProject.name.trim(),
-        latitude,
-        longitude,
-        status: editingProject.status.trim(),
-      })
-      .eq("id", editingProject.id)
-      .select()
-      .maybeSingle();
+    const { data, error } =
+      await supabase
+        .from("projects")
+        .update({
+          name:
+            editingProject.name.trim(),
+          latitude,
+          longitude,
+          status:
+            editingProject.status.trim(),
+        })
+        .eq(
+          "id",
+          editingProject.id
+        )
+        .select()
+        .maybeSingle();
 
     if (error) {
       console.error(
@@ -398,28 +490,138 @@ export default function DashboardPage() {
       return;
     }
 
-    const updatedProject = data as Project;
+    const updatedProject =
+      data as Project;
 
-    setProjects((currentProjects) =>
-      currentProjects.map((project) =>
-        project.id === updatedProject.id
-          ? updatedProject
-          : project
-      )
+    setProjects(
+      (currentProjects) =>
+        currentProjects.map(
+          (project) =>
+            project.id ===
+            updatedProject.id
+              ? updatedProject
+              : project
+        )
     );
 
-    setSelectedProject((currentProject) =>
-      currentProject.id === updatedProject.id
-        ? updatedProject
-        : currentProject
+    setSelectedProject(
+      (currentProject) =>
+        currentProject.id ===
+        updatedProject.id
+          ? updatedProject
+          : currentProject
     );
 
     setEditingProject(null);
     setEditModalOpen(false);
 
     if (updatedProject.id) {
-      await loadLatestAnalysis(updatedProject.id);
+      await loadLatestAnalysis(
+        updatedProject.id
+      );
     }
+  }
+
+  // =========================================================
+  // AGRONOMIST PRIORITY INBOX
+  // =========================================================
+
+  function priorityWeight(
+    priority?: string | null
+  ) {
+    if (priority === "Kritická") {
+      return 4;
+    }
+
+    if (priority === "Vysoká") {
+      return 3;
+    }
+
+    if (priority === "Střední") {
+      return 2;
+    }
+
+    if (priority === "Nízká") {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  const priorityProjects = [
+    ...dashboardProjects,
+  ]
+    .filter(
+      (project) =>
+        project.latestAnalysis != null
+    )
+    .sort((a, b) => {
+      const priorityDifference =
+        priorityWeight(
+          b.latestRecommendation
+            ?.priority
+        ) -
+        priorityWeight(
+          a.latestRecommendation
+            ?.priority
+        );
+
+      if (
+        priorityDifference !== 0
+      ) {
+        return priorityDifference;
+      }
+
+      const alertDifference =
+        b.unreadAlerts -
+        a.unreadAlerts;
+
+      if (
+        alertDifference !== 0
+      ) {
+        return alertDifference;
+      }
+
+      const aTime =
+        a.latestAnalysis?.created_at
+          ? new Date(
+              a.latestAnalysis.created_at
+            ).getTime()
+          : 0;
+
+      const bTime =
+        b.latestAnalysis?.created_at
+          ? new Date(
+              b.latestAnalysis.created_at
+            ).getTime()
+          : 0;
+
+      return bTime - aTime;
+    });
+
+  function validationLabel(
+    result:
+      | FieldValidationResult
+      | undefined
+  ) {
+    if (result === "confirmed") {
+      return "Potvrzeno v terénu";
+    }
+
+    if (
+      result ===
+      "partially_confirmed"
+    ) {
+      return "Částečně potvrzeno";
+    }
+
+    if (
+      result === "not_confirmed"
+    ) {
+      return "Nepotvrzeno";
+    }
+
+    return "Čeká na terénní ověření";
   }
 
   // =========================================================
@@ -454,6 +656,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-4">
 
             <div className="hidden text-right md:block">
+
               <div className="text-sm font-semibold text-slate-300">
                 {user?.email ?? ""}
               </div>
@@ -461,6 +664,7 @@ export default function DashboardPage() {
               <div className="text-xs text-slate-600">
                 Přihlášený uživatel
               </div>
+
             </div>
 
             <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/10">
@@ -476,7 +680,9 @@ export default function DashboardPage() {
             </button>
 
           </div>
+
         </div>
+
       </header>
 
       {/* ================================================= */}
@@ -504,6 +710,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div>
+
                   <div className="font-semibold text-cyan-400">
                     Dashboard
                   </div>
@@ -511,9 +718,11 @@ export default function DashboardPage() {
                   <div className="text-xs text-slate-500">
                     Přehled systému
                   </div>
+
                 </div>
 
               </div>
+
             </div>
 
             {/* AI ANALÝZA */}
@@ -527,6 +736,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
+
                 <div className="font-semibold">
                   AI Analýza
                 </div>
@@ -534,7 +744,9 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">
                   Analýza dat
                 </div>
+
               </div>
+
             </Link>
 
             {/* MAPA */}
@@ -548,6 +760,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
+
                 <div className="font-semibold">
                   Mapa
                 </div>
@@ -555,7 +768,9 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">
                   Lokality projektů
                 </div>
+
               </div>
+
             </Link>
 
             {/* PROJEKTY */}
@@ -569,6 +784,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
+
                 <div className="font-semibold">
                   Projekty
                 </div>
@@ -576,7 +792,9 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">
                   Správa projektů
                 </div>
+
               </div>
+
             </Link>
 
             {/* REPORTY */}
@@ -590,6 +808,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
+
                 <div className="font-semibold">
                   Reporty
                 </div>
@@ -597,7 +816,9 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">
                   Výsledky analýz
                 </div>
+
               </div>
+
             </Link>
 
             {/* SETTINGS */}
@@ -611,6 +832,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
+
                 <div className="font-semibold">
                   Nastavení
                 </div>
@@ -618,7 +840,9 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">
                   Nastavení platformy
                 </div>
+
               </div>
+
             </Link>
 
             {/* AEGRIS CARD */}
@@ -645,9 +869,11 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+
             </div>
 
           </div>
+
         </aside>
 
         {/* ================================================= */}
@@ -665,11 +891,15 @@ export default function DashboardPage() {
             <div>
 
               <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-600">
+
                 <span>AEGRIS</span>
+
                 <span>/</span>
+
                 <span className="text-cyan-400">
                   Dashboard
                 </span>
+
               </div>
 
               <h1 className="text-4xl font-black tracking-tight md:text-5xl">
@@ -711,6 +941,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
 
                 <div>
+
                   <div className="text-xs uppercase tracking-wider text-slate-600">
                     Projekty
                   </div>
@@ -718,6 +949,7 @@ export default function DashboardPage() {
                   <div className="mt-3 text-5xl font-black text-cyan-400">
                     {dashboardCounts.projects}
                   </div>
+
                 </div>
 
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-400/10 text-xl">
@@ -725,6 +957,7 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+
             </div>
 
             {/* AI */}
@@ -734,6 +967,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
 
                 <div>
+
                   <div className="text-xs uppercase tracking-wider text-slate-600">
                     AI analýzy
                   </div>
@@ -741,6 +975,7 @@ export default function DashboardPage() {
                   <div className="mt-3 text-5xl font-black text-emerald-400">
                     {dashboardCounts.analyses}
                   </div>
+
                 </div>
 
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/10 text-xl">
@@ -748,6 +983,7 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+
             </div>
 
             {/* REPORTS */}
@@ -757,6 +993,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
 
                 <div>
+
                   <div className="text-xs uppercase tracking-wider text-slate-600">
                     Reporty
                   </div>
@@ -764,6 +1001,7 @@ export default function DashboardPage() {
                   <div className="mt-3 text-5xl font-black text-yellow-400">
                     {dashboardCounts.reports}
                   </div>
+
                 </div>
 
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-yellow-400/10 text-xl">
@@ -771,6 +1009,7 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+
             </div>
 
             {/* ALERTS */}
@@ -780,6 +1019,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
 
                 <div>
+
                   <div className="text-xs uppercase tracking-wider text-slate-600">
                     Alerty
                   </div>
@@ -787,6 +1027,7 @@ export default function DashboardPage() {
                   <div className="mt-3 text-5xl font-black text-red-400">
                     {dashboardCounts.unreadAlerts}
                   </div>
+
                 </div>
 
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-400/10 text-xl">
@@ -794,7 +1035,245 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+
             </div>
+
+          </section>
+
+          {/* ================================================= */}
+          {/* AGRONOMIST PRIORITY INBOX */}
+          {/* ================================================= */}
+
+          <section className="mb-6 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 md:p-8">
+
+            <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+
+              <div>
+
+                <div className="text-xs uppercase tracking-[0.2em] text-cyan-400">
+                  Priorita agronoma
+                </div>
+
+                <h2 className="mt-1 text-2xl font-bold">
+                  Co dnes vyžaduje pozornost
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Pozemky seřazené podle poslední uložené
+                  priority AegRIS, upozornění a stavu
+                  terénního ověření.
+                </p>
+
+              </div>
+
+              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-4 py-2.5 text-sm font-semibold text-amber-400">
+                {dashboardCounts.pendingFieldValidations}{" "}
+                čeká na ověření
+              </div>
+
+            </div>
+
+            {priorityProjects.length === 0 ? (
+
+              <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/30 p-8 text-center">
+
+                <div className="text-3xl">
+                  ✓
+                </div>
+
+                <div className="mt-3 font-semibold">
+                  Zatím nejsou dostupné
+                  analyzované projekty
+                </div>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Priority se zobrazí po první
+                  uložené analýze.
+                </p>
+
+              </div>
+
+            ) : (
+
+              <div className="grid gap-3">
+
+                {priorityProjects.map(
+                  (project) => {
+                    const priority =
+                      project
+                        .latestRecommendation
+                        ?.priority ??
+                      "Bez priority";
+
+                    const score =
+                      project
+                        .latestRecommendation
+                        ?.score ?? null;
+
+                    const priorityClass =
+                      priority === "Kritická"
+                        ? "border-red-500/20 bg-red-500/[0.05] text-red-400"
+                        : priority ===
+                            "Vysoká"
+                          ? "border-orange-500/20 bg-orange-500/[0.05] text-orange-400"
+                          : priority ===
+                              "Střední"
+                            ? "border-amber-500/20 bg-amber-500/[0.05] text-amber-400"
+                            : priority ===
+                                "Nízká"
+                              ? "border-emerald-500/20 bg-emerald-500/[0.05] text-emerald-400"
+                              : "border-slate-700 bg-slate-800/40 text-slate-400";
+
+                    const validation =
+                      project
+                        .latestFieldValidation;
+
+                    const validationClass =
+                      validation
+                        ?.validation_result ===
+                      "confirmed"
+                        ? "text-emerald-400"
+                        : validation
+                              ?.validation_result ===
+                            "partially_confirmed"
+                          ? "text-amber-400"
+                          : validation
+                                ?.validation_result ===
+                              "not_confirmed"
+                            ? "text-red-400"
+                            : "text-amber-400";
+
+                    return (
+                      <div
+                        key={project.id}
+                        className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/30 p-5 lg:grid-cols-[1.5fr_0.9fr_0.8fr_1.1fr_auto] lg:items-center"
+                      >
+
+                        {/* PROJECT */}
+
+                        <div>
+
+                          <div className="text-xs uppercase tracking-wider text-slate-600">
+                            Pozemek
+                          </div>
+
+                          <div className="mt-1 font-semibold text-cyan-400">
+                            {project.name}
+                          </div>
+
+                          <div className="mt-2 text-xs text-slate-500">
+
+                            Poslední analýza{" "}
+
+                            {project
+                              .latestAnalysis
+                              ?.created_at
+                              ? new Date(
+                                  project
+                                    .latestAnalysis
+                                    .created_at
+                                ).toLocaleString(
+                                  "cs-CZ"
+                                )
+                              : "—"}
+
+                          </div>
+
+                        </div>
+
+                        {/* PRIORITY */}
+
+                        <div>
+
+                          <div className="text-xs uppercase tracking-wider text-slate-600">
+                            Priorita
+                          </div>
+
+                          <div
+                            className={`mt-1 inline-flex rounded-lg border px-2.5 py-1 text-sm font-bold ${priorityClass}`}
+                          >
+                            {priority}
+                          </div>
+
+                        </div>
+
+                        {/* SCORE */}
+
+                        <div>
+
+                          <div className="text-xs uppercase tracking-wider text-slate-600">
+                            Skóre
+                          </div>
+
+                          <div className="mt-1 text-xl font-black text-white">
+                            {score != null
+                              ? `${score} / 100`
+                              : "—"}
+                          </div>
+
+                        </div>
+
+                        {/* STATUS */}
+
+                        <div>
+
+                          <div className="text-xs uppercase tracking-wider text-slate-600">
+                            Stav
+                          </div>
+
+                          <div className="mt-1 text-sm font-semibold">
+
+                            {project.unreadAlerts >
+                            0 ? (
+                              <span className="text-red-400">
+                                ⚠{" "}
+                                {
+                                  project.unreadAlerts
+                                }{" "}
+                                upozornění
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">
+                                Bez nových
+                                upozornění
+                              </span>
+                            )}
+
+                          </div>
+
+                          <div
+                            className={`mt-1 text-xs font-medium ${validationClass}`}
+                          >
+
+                            {validation
+                              ? `✓ ${validationLabel(
+                                  validation.validation_result
+                                )}`
+                              : "○ Čeká na terénní ověření"}
+
+                          </div>
+
+                        </div>
+
+                        {/* OPEN */}
+
+                        {project.id && (
+                          <Link
+                            href={`/projects/${project.id}`}
+                            className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
+                          >
+                            Otevřít pozemek →
+                          </Link>
+                        )}
+
+                      </div>
+                    );
+                  }
+                )}
+
+              </div>
+
+            )}
 
           </section>
 
@@ -819,15 +1298,21 @@ export default function DashboardPage() {
 
                 <WorldMap
                   projects={projects}
-                  onLocationSelect={(location) => {
+                  onLocationSelect={(
+                    location
+                  ) => {
                     if (location.id) {
-                      selectProject(location);
+                      selectProject(
+                        location
+                      );
                       return;
                     }
 
                     setNewLocation({
-                      latitude: location.latitude,
-                      longitude: location.longitude,
+                      latitude:
+                        location.latitude,
+                      longitude:
+                        location.longitude,
                     });
 
                     setModalOpen(true);
@@ -835,6 +1320,7 @@ export default function DashboardPage() {
                 />
 
               </div>
+
             </div>
 
             {/* AI ASSISTANT */}
@@ -848,13 +1334,16 @@ export default function DashboardPage() {
                 </div>
 
                 <div>
+
                   <h2 className="font-bold">
                     AI Assistant
                   </h2>
 
                   <p className="text-xs text-slate-500">
-                    Analýza aktuálního projektu
+                    Analýza aktuálního
+                    projektu
                   </p>
+
                 </div>
 
               </div>
@@ -880,7 +1369,9 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-1 text-sm font-medium text-slate-300">
-                    {selectedProject.latitude.toFixed(5)}
+                    {selectedProject.latitude.toFixed(
+                      5
+                    )}
                   </div>
 
                 </div>
@@ -892,7 +1383,9 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="mt-1 text-sm font-medium text-slate-300">
-                    {selectedProject.longitude.toFixed(5)}
+                    {selectedProject.longitude.toFixed(
+                      5
+                    )}
                   </div>
 
                 </div>
@@ -929,7 +1422,9 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="mt-2 text-4xl font-black text-cyan-400">
-                      {analysis.ndvi.toFixed(3)}
+                      {analysis.ndvi.toFixed(
+                        3
+                      )}
                     </div>
 
                     <div className="mt-5 flex items-center justify-between border-t border-slate-800 pt-4">
@@ -939,7 +1434,8 @@ export default function DashboardPage() {
                       </span>
 
                       <span className="font-bold text-amber-400">
-                        {analysis.score != null
+                        {analysis.score !=
+                        null
                           ? `${analysis.score} / 100`
                           : "—"}
                       </span>
@@ -954,9 +1450,11 @@ export default function DashboardPage() {
 
                       <span
                         className={`font-bold ${
-                          analysis.risk === "Vysoké"
+                          analysis.risk ===
+                          "Vysoké"
                             ? "text-red-400"
-                            : analysis.risk === "Střední"
+                            : analysis.risk ===
+                                "Střední"
                               ? "text-yellow-400"
                               : "text-green-400"
                         }`}
@@ -967,6 +1465,7 @@ export default function DashboardPage() {
                     </div>
 
                   </div>
+
                 </div>
               )}
 
@@ -978,18 +1477,26 @@ export default function DashboardPage() {
 
               <button
                 type="button"
-                onClick={openSelectedProjectAnalysis}
-                disabled={!selectedProject.id}
+                onClick={
+                  openSelectedProjectAnalysis
+                }
+                disabled={
+                  !selectedProject.id
+                }
                 className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
+
                 <span className="text-lg">
                   🧠
                 </span>
 
-                Otevřít projekt a spustit analýzu
+                Otevřít projekt a spustit
+                analýzu
+
               </button>
 
             </div>
+
           </section>
 
           {/* ================================================= */}
@@ -1011,14 +1518,17 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Přehled všech projektů aktivní organizace.
+                  Přehled všech projektů
+                  aktivní organizace.
                 </p>
 
               </div>
 
               <button
                 type="button"
-                onClick={openNewProjectModal}
+                onClick={
+                  openNewProjectModal
+                }
                 className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-2.5 text-sm font-semibold text-cyan-400 transition hover:bg-cyan-400/10"
               >
                 ＋ Nový projekt
@@ -1039,7 +1549,8 @@ export default function DashboardPage() {
                 </div>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Vytvořte první projekt pomocí tlačítka výše.
+                  Vytvořte první projekt
+                  pomocí tlačítka výše.
                 </p>
 
               </div>
@@ -1048,104 +1559,128 @@ export default function DashboardPage() {
 
               <div className="grid gap-3">
 
-                {projects.map((project) => (
+                {projects.map(
+                  (project) => (
 
-                  <div
-                    key={project.id}
-                    className={`grid w-full gap-4 rounded-2xl border p-5 transition md:grid-cols-[1.5fr_1fr_1fr_0.8fr_auto] ${
-                      selectedProject.id ===
-                      project.id
-                        ? "border-cyan-400/30 bg-cyan-400/[0.05]"
-                        : "border-slate-800 bg-slate-950/30 hover:border-slate-700 hover:bg-slate-900"
-                    }`}
-                  >
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectProject(project)
-                      }
-                      className="text-left"
+                    <div
+                      key={project.id}
+                      className={`grid w-full gap-4 rounded-2xl border p-5 transition md:grid-cols-[1.5fr_1fr_1fr_0.8fr_auto] ${
+                        selectedProject.id ===
+                        project.id
+                          ? "border-cyan-400/30 bg-cyan-400/[0.05]"
+                          : "border-slate-800 bg-slate-950/30 hover:border-slate-700 hover:bg-slate-900"
+                      }`}
                     >
-                      <div className="text-xs uppercase tracking-wider text-slate-600">
-                        Projekt
-                      </div>
 
-                      <div className="mt-1 font-semibold text-cyan-400">
-                        {project.name}
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectProject(project)
-                      }
-                      className="text-left"
-                    >
-                      <div className="text-xs uppercase tracking-wider text-slate-600">
-                        Latitude
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-300">
-                        {project.latitude.toFixed(5)}
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectProject(project)
-                      }
-                      className="text-left"
-                    >
-                      <div className="text-xs uppercase tracking-wider text-slate-600">
-                        Longitude
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-300">
-                        {project.longitude.toFixed(5)}
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectProject(project)
-                      }
-                      className="text-left"
-                    >
-                      <div className="text-xs uppercase tracking-wider text-slate-600">
-                        Status
-                      </div>
-
-                      <div className="mt-1 font-semibold text-emerald-400">
-                        {project.status}
-                      </div>
-                    </button>
-
-                    {project.id && (
-                      <Link
-                        href={`/projects/${project.id}`}
-                        className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectProject(
+                            project
+                          )
+                        }
+                        className="text-left"
                       >
-                        Otevřít detail projektu →
-                      </Link>
-                    )}
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openEditProjectModal(project)
-                      }
-                      className="self-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-2.5 text-sm font-semibold text-cyan-400 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
-                    >
-                      ✏️ Upravit
-                    </button>
+                        <div className="text-xs uppercase tracking-wider text-slate-600">
+                          Projekt
+                        </div>
 
-                  </div>
+                        <div className="mt-1 font-semibold text-cyan-400">
+                          {project.name}
+                        </div>
 
-                ))}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectProject(
+                            project
+                          )
+                        }
+                        className="text-left"
+                      >
+
+                        <div className="text-xs uppercase tracking-wider text-slate-600">
+                          Latitude
+                        </div>
+
+                        <div className="mt-1 text-sm text-slate-300">
+                          {project.latitude.toFixed(
+                            5
+                          )}
+                        </div>
+
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectProject(
+                            project
+                          )
+                        }
+                        className="text-left"
+                      >
+
+                        <div className="text-xs uppercase tracking-wider text-slate-600">
+                          Longitude
+                        </div>
+
+                        <div className="mt-1 text-sm text-slate-300">
+                          {project.longitude.toFixed(
+                            5
+                          )}
+                        </div>
+
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectProject(
+                            project
+                          )
+                        }
+                        className="text-left"
+                      >
+
+                        <div className="text-xs uppercase tracking-wider text-slate-600">
+                          Status
+                        </div>
+
+                        <div className="mt-1 font-semibold text-emerald-400">
+                          {project.status}
+                        </div>
+
+                      </button>
+
+                      {project.id && (
+                        <Link
+                          href={`/projects/${project.id}`}
+                          className="flex items-center justify-center rounded-xl bg-cyan-500 px-4 py-3 text-center font-bold text-slate-950 transition hover:bg-cyan-400"
+                        >
+                          Otevřít detail projektu →
+                        </Link>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openEditProjectModal(
+                            project
+                          )
+                        }
+                        className="self-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-2.5 text-sm font-semibold text-cyan-400 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                      >
+                        ✏️ Upravit
+                      </button>
+
+                    </div>
+
+                  )
+                )}
 
               </div>
 
@@ -1160,7 +1695,8 @@ export default function DashboardPage() {
           <footer className="mt-8 flex flex-col justify-between gap-3 border-t border-slate-800/70 py-6 text-xs text-slate-600 sm:flex-row">
 
             <div>
-              AEGRIS — Agriculture Intelligence Platform
+              AEGRIS — Agriculture
+              Intelligence Platform
             </div>
 
             <div>
@@ -1173,92 +1709,160 @@ export default function DashboardPage() {
           </footer>
 
         </section>
+
       </div>
 
       {/* ================================================= */}
       {/* EDIT PROJECT MODAL */}
       {/* ================================================= */}
 
-      {editModalOpen && editingProject && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-[#020617] p-6 shadow-2xl">
+      {editModalOpen &&
+        editingProject && (
 
-            <div className="mb-6">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
 
-              <div className="text-xs uppercase tracking-[0.2em] text-cyan-400">
-                Projekt
+            <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-[#020617] p-6 shadow-2xl">
+
+              <div className="mb-6">
+
+                <div className="text-xs uppercase tracking-[0.2em] text-cyan-400">
+                  Projekt
+                </div>
+
+                <h2 className="mt-1 text-2xl font-bold">
+                  Upravit projekt
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Uprav název,
+                  souřadnice nebo status
+                  projektu.
+                </p>
+
               </div>
 
-              <h2 className="mt-1 text-2xl font-bold">
-                Upravit projekt
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                Uprav název, souřadnice nebo status projektu.
-              </p>
-
-            </div>
-
-            <div className="space-y-4">
-
-              <label className="block">
-
-                <span className="mb-2 block text-sm font-medium text-slate-300">
-                  Název projektu
-                </span>
-
-                <input
-                  type="text"
-                  value={editingProject.name}
-                  onChange={(event) =>
-                    setEditingProject({
-                      ...editingProject,
-                      name: event.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
-                />
-
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-4">
 
                 <label className="block">
 
                   <span className="mb-2 block text-sm font-medium text-slate-300">
-                    Latitude
+                    Název projektu
                   </span>
 
                   <input
-                    type="number"
-                    step="any"
-                    value={editingProject.latitude}
-                    onChange={(event) =>
-                      setEditingProject({
-                        ...editingProject,
-                        latitude: Number(event.target.value),
-                      })
+                    type="text"
+                    value={
+                      editingProject.name
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setEditingProject(
+                        {
+                          ...editingProject,
+                          name:
+                            event
+                              .target
+                              .value,
+                        }
+                      )
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                   />
 
                 </label>
 
+                <div className="grid gap-4 sm:grid-cols-2">
+
+                  <label className="block">
+
+                    <span className="mb-2 block text-sm font-medium text-slate-300">
+                      Latitude
+                    </span>
+
+                    <input
+                      type="number"
+                      step="any"
+                      value={
+                        editingProject.latitude
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setEditingProject(
+                          {
+                            ...editingProject,
+                            latitude:
+                              Number(
+                                event
+                                  .target
+                                  .value
+                              ),
+                          }
+                        )
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
+                    />
+
+                  </label>
+
+                  <label className="block">
+
+                    <span className="mb-2 block text-sm font-medium text-slate-300">
+                      Longitude
+                    </span>
+
+                    <input
+                      type="number"
+                      step="any"
+                      value={
+                        editingProject.longitude
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setEditingProject(
+                          {
+                            ...editingProject,
+                            longitude:
+                              Number(
+                                event
+                                  .target
+                                  .value
+                              ),
+                          }
+                        )
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
+                    />
+
+                  </label>
+
+                </div>
+
                 <label className="block">
 
                   <span className="mb-2 block text-sm font-medium text-slate-300">
-                    Longitude
+                    Status
                   </span>
 
                   <input
-                    type="number"
-                    step="any"
-                    value={editingProject.longitude}
-                    onChange={(event) =>
-                      setEditingProject({
-                        ...editingProject,
-                        longitude: Number(event.target.value),
-                      })
+                    type="text"
+                    value={
+                      editingProject.status
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setEditingProject(
+                        {
+                          ...editingProject,
+                          status:
+                            event
+                              .target
+                              .value,
+                        }
+                      )
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
                   />
@@ -1267,54 +1871,41 @@ export default function DashboardPage() {
 
               </div>
 
-              <label className="block">
+              <div className="mt-6 flex justify-end gap-3">
 
-                <span className="mb-2 block text-sm font-medium text-slate-300">
-                  Status
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditModalOpen(
+                      false
+                    );
 
-                <input
-                  type="text"
-                  value={editingProject.status}
-                  onChange={(event) =>
-                    setEditingProject({
-                      ...editingProject,
-                      status: event.target.value,
-                    })
+                    setEditingProject(
+                      null
+                    );
+                  }}
+                  className="rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-300 transition hover:bg-slate-800"
+                >
+                  Zrušit
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    saveEditedProject
                   }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
-                />
+                  className="rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950 transition hover:bg-cyan-400"
+                >
+                  Uložit změny
+                </button>
 
-              </label>
-
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-
-              <button
-                type="button"
-                onClick={() => {
-                  setEditModalOpen(false);
-                  setEditingProject(null);
-                }}
-                className="rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-300 transition hover:bg-slate-800"
-              >
-                Zrušit
-              </button>
-
-              <button
-                type="button"
-                onClick={saveEditedProject}
-                className="rounded-xl bg-cyan-500 px-5 py-3 font-bold text-slate-950 transition hover:bg-cyan-400"
-              >
-                Uložit změny
-              </button>
+              </div>
 
             </div>
 
           </div>
-        </div>
-      )}
+
+        )}
 
       {/* ================================================= */}
       {/* NEW PROJECT MODAL */}
@@ -1322,26 +1913,50 @@ export default function DashboardPage() {
 
       <NewProjectModal
         open={modalOpen}
-        latitude={newLocation.latitude}
-        longitude={newLocation.longitude}
+        latitude={
+          newLocation.latitude
+        }
+        longitude={
+          newLocation.longitude
+        }
         onClose={() =>
           setModalOpen(false)
         }
-        onSave={async (project) => {
-          if (!user || !activeOrganizationId) return;
+        onSave={async (
+          project
+        ) => {
+          if (
+            !user ||
+            !activeOrganizationId
+          ) {
+            return;
+          }
 
           const { error } =
             await supabase
               .from("projects")
               .insert([
                 {
-                  name: project.name,
-                  latitude: project.latitude,
-                  longitude: project.longitude,
-                  status: project.status,
-                  boundary: project.boundary,
-                  user_id: user.id,
-                  organization_id: activeOrganizationId,
+                  name:
+                    project.name,
+
+                  latitude:
+                    project.latitude,
+
+                  longitude:
+                    project.longitude,
+
+                  status:
+                    project.status,
+
+                  boundary:
+                    project.boundary,
+
+                  user_id:
+                    user.id,
+
+                  organization_id:
+                    activeOrganizationId,
                 },
               ]);
 
@@ -1350,10 +1965,13 @@ export default function DashboardPage() {
               "CHYBA ULOŽENÍ PROJEKTU:",
               error
             );
+
             return;
           }
 
-          await loadProjects(activeOrganizationId);
+          await loadProjects(
+            activeOrganizationId
+          );
 
           setSelectedProject({
             ...project,
