@@ -4,6 +4,16 @@ import { redirect } from "next/navigation";
 import { requireAdminAccess } from "@/lib/auth/admin-access";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+const navigation = [
+  { href: "/admin", label: "Přehled", index: "01" },
+  { href: "/admin/customers", label: "Zákazníci", index: "02" },
+  { href: "/admin/demo", label: "DEMO", index: "03" },
+  { href: "/admin/projects", label: "Projekty", index: "04" },
+  { href: "/admin/analyses", label: "Analýzy", index: "05" },
+  { href: "/admin/support", label: "Support", index: "06" },
+  { href: "/admin/system", label: "Systém", index: "07" },
+];
+
 export default async function AdminLayout({
   children,
 }: Readonly<{
@@ -22,95 +32,73 @@ export default async function AdminLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-[#05090d] text-slate-100">
       <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 border-r border-slate-800 bg-slate-950 lg:flex lg:flex-col">
-          <div className="border-b border-slate-800 px-7 py-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-400">
+        <aside className="hidden w-[284px] shrink-0 border-r border-white/[0.06] bg-[#070c11] lg:flex lg:flex-col">
+          <div className="border-b border-white/[0.06] px-6 py-6">
+            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">
               AEGRIS
-            </p>
+            </div>
 
-            <h1 className="mt-2 text-xl font-semibold">
+            <h1 className="mt-3 text-xl font-black tracking-[-0.03em] text-white">
               Control Center
             </h1>
 
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-slate-700">
               Interní administrace
             </p>
           </div>
 
-          <nav className="flex-1 space-y-2 p-4">
-            <Link
-              href="/admin"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Přehled
-            </Link>
-
-            <Link
-              href="/admin/customers"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Zákazníci
-            </Link>
-
-            <Link
-              href="/admin/demo"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              DEMO
-            </Link>
-
-            <Link
-              href="/admin/projects"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Projekty
-            </Link>
-
-            <Link
-              href="/admin/analyses"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Analýzy
-            </Link>
-
-            <div className="my-4 border-t border-slate-800" />
-
-            <Link
-              href="/admin/support"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Support
-            </Link>
-
-            <Link
-              href="/admin/system"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-400 transition hover:bg-slate-900 hover:text-white"
-            >
-              Systém
-            </Link>
-          </nav>
-
-          <div className="border-t border-slate-800 p-5">
-            <p className="truncate text-sm font-medium text-slate-200">
-              {access.user.email}
-            </p>
-
-            <div className="mt-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-
-              <span className="text-xs uppercase tracking-wider text-slate-500">
-                Administrator
-              </span>
+          <nav className="flex-1 px-3 py-4">
+            <div className="mb-2 px-3 text-[7px] font-black uppercase tracking-[0.16em] text-slate-700">
+              Operations
             </div>
 
-            <Link
-              href="/dashboard"
-              className="mt-4 block text-sm text-slate-400 transition hover:text-white"
-            >
-              ← Zpět do AEGRIS
-            </Link>
+            <div className="space-y-1">
+              {navigation.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group flex items-center gap-3 rounded-xl border border-transparent px-3 py-3 transition hover:border-white/[0.05] hover:bg-white/[0.025]"
+                >
+                  <span className="w-5 text-[7px] font-black tracking-[0.12em] text-slate-700 transition group-hover:text-cyan-300/60">
+                    {item.index}
+                  </span>
+
+                  <span className="text-[11px] font-bold text-slate-500 transition group-hover:text-white">
+                    {item.label}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </nav>
+
+          <div className="border-t border-white/[0.06] p-5">
+            <div className="rounded-2xl border border-white/[0.06] bg-[#0a1016] p-4">
+              <div className="text-[7px] font-black uppercase tracking-[0.14em] text-slate-700">
+                Admin Session
+              </div>
+
+              <p className="mt-3 truncate text-[11px] font-bold text-slate-300">
+                {access.user.email}
+              </p>
+
+              <div className="mt-2 flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+
+                <span className="text-[8px] font-black uppercase tracking-[0.12em] text-emerald-300/80">
+                  Administrator
+                </span>
+              </div>
+
+              <Link
+                href="/dashboard"
+                className="mt-4 inline-flex items-center gap-2 text-[8px] font-black uppercase tracking-[0.1em] text-slate-600 transition hover:text-cyan-300"
+              >
+                <span>←</span>
+                <span>Zpět do AEGRIS</span>
+              </Link>
+            </div>
           </div>
         </aside>
 

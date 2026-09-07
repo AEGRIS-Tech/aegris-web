@@ -24,22 +24,22 @@ function formatDate(value: string | null) {
 
 function getStatusClasses(status: string) {
   if (status === "open") {
-    return "border-amber-500/20 bg-amber-500/10 text-amber-300";
+    return "border-amber-300/10 bg-amber-300/[0.04] text-amber-300";
   }
 
   if (status === "in_progress") {
-    return "border-cyan-500/20 bg-cyan-500/10 text-cyan-300";
+    return "border-cyan-300/10 bg-cyan-300/[0.04] text-cyan-300";
   }
 
   if (status === "resolved") {
-    return "border-emerald-500/20 bg-emerald-500/10 text-emerald-300";
+    return "border-emerald-300/10 bg-emerald-300/[0.04] text-emerald-300";
   }
 
   if (status === "closed") {
-    return "border-slate-700 bg-slate-800 text-slate-400";
+    return "border-white/[0.06] bg-white/[0.02] text-slate-500";
   }
 
-  return "border-slate-700 bg-slate-800 text-slate-300";
+  return "border-white/[0.06] bg-white/[0.02] text-slate-400";
 }
 
 function getPriorityClasses(priority: string) {
@@ -55,171 +55,119 @@ function getPriorityClasses(priority: string) {
     return "text-slate-300";
   }
 
-  return "text-slate-500";
+  return "text-slate-700";
 }
 
 export default async function AdminSupportPage() {
   const overview = await getAdminSupportOverview();
 
   return (
-    <>
-      <header className="border-b border-slate-800 bg-slate-950/80 px-5 py-5 backdrop-blur lg:px-10">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#05090d] text-slate-100">
+      <header className="border-b border-white/[0.06] bg-[#070c11]/95 px-5 py-5 backdrop-blur-xl lg:px-8">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-cyan-400 lg:hidden">
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300 lg:hidden">
               AEGRIS Control Center
-            </p>
-
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+            </div>
+            <h1 className="mt-1 text-2xl font-black tracking-[-0.035em] text-white">
               Support
-            </h2>
+            </h1>
           </div>
 
-          <div className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5">
-            <span className="text-xs font-medium text-slate-300">
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2">
+            <span className="text-[8px] font-black uppercase tracking-[0.12em] text-slate-500">
               {overview.totalTickets} ticketů
             </span>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-5 py-8 lg:px-10 lg:py-10">
-        <div className="mb-8">
-          <h3 className="text-2xl font-semibold tracking-tight">
+      <main className="mx-auto max-w-[1600px] px-5 py-8 lg:px-8 lg:py-10">
+        <section className="mb-8">
+          <div className="text-[9px] font-black uppercase tracking-[0.18em] text-cyan-300">
+            Support Operations
+          </div>
+          <h2 className="mt-3 text-4xl font-black tracking-[-0.045em] text-white">
             Support centrum
-          </h3>
-
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+          </h2>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-500">
             Interní přehled zákaznických požadavků a support ticketů.
           </p>
+        </section>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Metric label="Ticketů celkem" value={overview.totalTickets} />
+          <Metric label="Open" value={overview.openTickets} tone="warning" />
+          <Metric label="In progress" value={overview.inProgressTickets} tone="cyan" />
+          <Metric label="Vyřešené" value={overview.resolvedTickets} tone="positive" />
+          <Metric label="Urgentní" value={overview.urgentTickets} tone="danger" />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
-              Ticketů celkem
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold">
-              {overview.totalTickets}
-            </p>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
-              Open
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold text-amber-300">
-              {overview.openTickets}
-            </p>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
-              In progress
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold text-cyan-300">
-              {overview.inProgressTickets}
-            </p>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
-              Vyřešené
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold text-emerald-300">
-              {overview.resolvedTickets}
-            </p>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
-              Urgentní
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold text-rose-300">
-              {overview.urgentTickets}
-            </p>
-          </section>
-        </div>
-
-        <section className="mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-          <div className="border-b border-slate-800 px-6 py-5">
-            <h3 className="font-semibold">
+        <section className="mt-8 overflow-hidden rounded-[22px] border border-white/[0.07] bg-[#0a1016]">
+          <div className="border-b border-white/[0.06] px-6 py-5">
+            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-cyan-300">
+              Ticket Registry
+            </div>
+            <h3 className="mt-2 text-lg font-black text-white">
               Support tickety
             </h3>
-
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-[9px] leading-5 text-slate-600">
               Aktuálně evidované požadavky zákazníků.
             </p>
           </div>
 
           <div className="overflow-x-auto">
             <table className="min-w-full">
-              <thead className="border-b border-slate-800 bg-slate-950/60">
+              <thead className="border-b border-white/[0.06] bg-[#071017]">
                 <tr>
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Ticket
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Zákazník
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Status
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Priorita
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Vytvořeno
-                  </th>
-
-                  <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Vyřešeno
-                  </th>
-
-                  <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    Účet
-                  </th>
+                  {[
+                    "Ticket",
+                    "Zákazník",
+                    "Status",
+                    "Priorita",
+                    "Vytvořeno",
+                    "Vyřešeno",
+                    "Účet",
+                  ].map((label, index) => (
+                    <th
+                      key={label}
+                      className={`px-5 py-4 text-[8px] font-black uppercase tracking-[0.13em] text-slate-700 ${
+                        index === 6 ? "text-right" : "text-left"
+                      }`}
+                    >
+                      {label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
 
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-white/[0.05]">
                 {overview.tickets.map((ticket) => (
                   <tr
                     key={ticket.id}
-                    className="transition hover:bg-slate-800/30"
+                    className="transition hover:bg-white/[0.02]"
                   >
                     <td className="px-5 py-4">
                       <div className="max-w-md">
-                        <p className="font-medium text-slate-100">
+                        <p className="text-[11px] font-black text-white">
                           {ticket.subject}
                         </p>
-
-                        <p className="mt-1 text-xs text-slate-600">
+                        <p className="mt-1 text-[8px] text-slate-700">
                           Ticket #{ticket.id}
                         </p>
-
-                        <p className="mt-2 line-clamp-2 text-sm leading-5 text-slate-500">
+                        <p className="mt-2 line-clamp-2 text-[9px] leading-5 text-slate-600">
                           {ticket.message}
                         </p>
                       </div>
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-300">
+                    <td className="px-5 py-4 text-[10px] text-slate-400">
                       {ticket.email}
                     </td>
 
                     <td className="px-5 py-4">
                       <span
-                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
+                        className={`inline-flex rounded-lg border px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em] ${getStatusClasses(
                           ticket.status
                         )}`}
                       >
@@ -229,7 +177,7 @@ export default async function AdminSupportPage() {
 
                     <td className="px-5 py-4">
                       <span
-                        className={`text-sm font-medium ${getPriorityClasses(
+                        className={`text-[10px] font-black ${getPriorityClasses(
                           ticket.priority
                         )}`}
                       >
@@ -237,11 +185,11 @@ export default async function AdminSupportPage() {
                       </span>
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-400">
+                    <td className="px-5 py-4 text-[10px] text-slate-500">
                       {formatDate(ticket.createdAt)}
                     </td>
 
-                    <td className="px-5 py-4 text-sm text-slate-400">
+                    <td className="px-5 py-4 text-[10px] text-slate-500">
                       {formatDate(ticket.resolvedAt)}
                     </td>
 
@@ -249,12 +197,12 @@ export default async function AdminSupportPage() {
                       {ticket.userId ? (
                         <Link
                           href={`/admin/customers/${ticket.userId}`}
-                          className="text-sm font-medium text-cyan-300 transition hover:text-cyan-200"
+                          className="text-[10px] font-black text-cyan-300 transition hover:text-cyan-200"
                         >
                           Otevřít →
                         </Link>
                       ) : (
-                        <span className="text-sm text-slate-600">
+                        <span className="text-[10px] text-slate-700">
                           Bez účtu
                         </span>
                       )}
@@ -264,16 +212,13 @@ export default async function AdminSupportPage() {
 
                 {overview.tickets.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="px-5 py-14 text-center"
-                    >
-                      <p className="text-sm font-medium text-slate-300">
+                    <td colSpan={7} className="px-5 py-14 text-center">
+                      <p className="text-[11px] font-black text-white">
                         Žádné support tickety
                       </p>
-
-                      <p className="mt-2 text-sm text-slate-500">
-                        Support infrastruktura je připravená, ale zatím nebyl vytvořen žádný ticket.
+                      <p className="mt-2 text-[9px] text-slate-600">
+                        Support infrastruktura je připravená, ale zatím nebyl
+                        vytvořen žádný ticket.
                       </p>
                     </td>
                   </tr>
@@ -283,14 +228,49 @@ export default async function AdminSupportPage() {
           </div>
         </section>
 
-        <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 px-5 py-4">
-          <p className="text-xs leading-5 text-slate-500">
-            Support je zatím read-only. Změny statusu, priority,
-            odpovědi administrátora a zákaznický support formulář
-            doplníme přes auditované serverové akce.
+        <div className="mt-5 rounded-2xl border border-white/[0.06] bg-[#0a1016] px-5 py-4">
+          <div className="text-[7px] font-black uppercase tracking-[0.14em] text-slate-700">
+            Read-only support
+          </div>
+          <p className="mt-2 text-[9px] leading-5 text-slate-600">
+            Support je zatím read-only. Změny statusu, priority, odpovědi
+            administrátora a zákaznický support formulář doplníme přes
+            auditované serverové akce.
           </p>
         </div>
+      </main>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "warning" | "cyan" | "positive" | "danger";
+}) {
+  const valueClass =
+    tone === "warning"
+      ? "text-amber-300"
+      : tone === "cyan"
+        ? "text-cyan-300"
+        : tone === "positive"
+          ? "text-emerald-300"
+          : tone === "danger"
+            ? "text-rose-300"
+            : "text-white";
+
+  return (
+    <section className="rounded-[18px] border border-white/[0.07] bg-[#0a1016] p-5">
+      <div className="text-[8px] font-black uppercase tracking-[0.13em] text-slate-600">
+        {label}
       </div>
-    </>
+      <div className={`mt-4 text-3xl font-black tracking-[-0.04em] ${valueClass}`}>
+        {value}
+      </div>
+    </section>
   );
 }

@@ -21,31 +21,28 @@ function formatDate(value: string | null) {
 }
 
 function statusClass(status: "ok" | "error") {
-  return status === "ok"
-    ? "text-emerald-300"
-    : "text-rose-300";
+  return status === "ok" ? "text-emerald-300" : "text-rose-300";
 }
 
 export default async function AdminSystemPage() {
   const overview = await getAdminSystemOverview();
 
   return (
-    <>
-      <header className="border-b border-slate-800 bg-slate-950/80 px-5 py-5 backdrop-blur lg:px-10">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#05090d] text-slate-100">
+      <header className="border-b border-white/[0.06] bg-[#070c11]/95 px-5 py-5 backdrop-blur-xl lg:px-8">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-cyan-400 lg:hidden">
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300 lg:hidden">
               AEGRIS Control Center
-            </p>
-
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+            </div>
+            <h1 className="mt-1 text-2xl font-black tracking-[-0.035em] text-white">
               Systém
-            </h2>
+            </h1>
           </div>
 
-          <div className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5">
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2">
             <span
-              className={`text-xs font-medium ${statusClass(
+              className={`text-[8px] font-black uppercase tracking-[0.12em] ${statusClass(
                 overview.database.status
               )}`}
             >
@@ -55,260 +52,222 @@ export default async function AdminSystemPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-5 py-8 lg:px-10 lg:py-10">
-        <div className="mb-8">
-          <h3 className="text-2xl font-semibold tracking-tight">
+      <main className="mx-auto max-w-[1600px] px-5 py-8 lg:px-8 lg:py-10">
+        <section className="mb-8">
+          <div className="text-[9px] font-black uppercase tracking-[0.18em] text-cyan-300">
+            System Diagnostics
+          </div>
+          <h2 className="mt-3 text-4xl font-black tracking-[-0.045em] text-white">
             Provozní stav AEGRIS
-          </h3>
-
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-            Read-only diagnostický přehled databáze, analytické
-            aktivity, DEMO lifecycle a interních dat.
+          </h2>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-500">
+            Read-only diagnostický přehled databáze, analytické aktivity, DEMO
+            lifecycle a interních dat.
           </p>
-        </div>
+        </section>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="rounded-[18px] border border-white/[0.07] bg-[#0a1016] p-5">
+            <div className="text-[8px] font-black uppercase tracking-[0.13em] text-slate-600">
               Databáze
-            </p>
-
-            <p
-              className={`mt-3 text-3xl font-semibold ${statusClass(
+            </div>
+            <div
+              className={`mt-4 text-3xl font-black tracking-[-0.04em] ${statusClass(
                 overview.database.status
               )}`}
             >
-              {overview.database.status === "ok"
-                ? "Online"
-                : "Error"}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-500">
+              {overview.database.status === "ok" ? "Online" : "Error"}
+            </div>
+            <p className="mt-2 text-[8px] text-slate-700">
               Health check {overview.database.latencyMs} ms
             </p>
           </section>
 
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
+          <section className="rounded-[18px] border border-white/[0.07] bg-[#0a1016] p-5">
+            <div className="text-[8px] font-black uppercase tracking-[0.13em] text-slate-600">
               Poslední analýza
-            </p>
-
-            <p className="mt-3 text-lg font-semibold text-cyan-300">
-              {formatDate(
-                overview.analysis.latestAnalysisAt
-              )}
-            </p>
+            </div>
+            <div className="mt-4 text-base font-black text-cyan-300">
+              {formatDate(overview.analysis.latestAnalysisAt)}
+            </div>
           </section>
 
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
+          <section className="rounded-[18px] border border-white/[0.07] bg-[#0a1016] p-5">
+            <div className="text-[8px] font-black uppercase tracking-[0.13em] text-slate-600">
               Analýzy dnes
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold">
+            </div>
+            <div className="mt-4 text-3xl font-black tracking-[-0.04em] text-white">
               {overview.analysis.analysesToday}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-500">
-              Posledních 24 h:{" "}
-              {overview.analysis.analysesLast24Hours}
+            </div>
+            <p className="mt-2 text-[8px] text-slate-700">
+              Posledních 24 h: {overview.analysis.analysesLast24Hours}
             </p>
           </section>
 
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">
+          <section className="rounded-[18px] border border-white/[0.07] bg-[#0a1016] p-5">
+            <div className="text-[8px] font-black uppercase tracking-[0.13em] text-slate-600">
               Alerty 24 h
-            </p>
-
-            <p className="mt-3 text-3xl font-semibold">
+            </div>
+            <div className="mt-4 text-3xl font-black tracking-[-0.04em] text-white">
               {overview.alerts.recent24Hours}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-500">
+            </div>
+            <p className="mt-2 text-[8px] text-slate-700">
               Celkem: {overview.alerts.total}
             </p>
           </section>
         </div>
 
-        <div className="mt-8 grid gap-6 xl:grid-cols-2">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <h3 className="font-semibold">
-              Datová základna
-            </h3>
+        <div className="mt-8 grid gap-4 xl:grid-cols-2">
+          <DataPanel
+            title="Datová základna"
+            subtitle="Celkové počty klíčových entit AEGRIS."
+            rows={[
+              ["Profily", overview.data.profiles],
+              ["Projekty", overview.data.projects],
+              ["Analýzy", overview.data.analyses],
+              ["DEMO žádosti", overview.data.demoRequests],
+              ["Alerty", overview.data.alerts],
+              ["Doporučení", overview.data.recommendations],
+            ]}
+          />
 
-            <p className="mt-1 text-sm text-slate-500">
-              Celkové počty klíčových entit AEGRIS.
-            </p>
-
-            <div className="mt-6 space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Profily
-                </span>
-                <span className="font-medium">
-                  {overview.data.profiles}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Projekty
-                </span>
-                <span className="font-medium">
-                  {overview.data.projects}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Analýzy
-                </span>
-                <span className="font-medium">
-                  {overview.data.analyses}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  DEMO žádosti
-                </span>
-                <span className="font-medium">
-                  {overview.data.demoRequests}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Alerty
-                </span>
-                <span className="font-medium">
-                  {overview.data.alerts}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Doporučení
-                </span>
-                <span className="font-medium">
-                  {overview.data.recommendations}
-                </span>
-              </div>
+          <section className="rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-6">
+            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-cyan-300">
+              Demo Lifecycle
             </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <h3 className="font-semibold">
-              DEMO lifecycle
-            </h3>
-
-            <p className="mt-1 text-sm text-slate-500">
+            <h3 className="mt-2 text-lg font-black text-white">DEMO lifecycle</h3>
+            <p className="mt-1 text-[9px] text-slate-600">
               Aktuální provozní stav zkušebních účtů.
             </p>
 
-            <div className="mt-6 space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Aktivní DEMO
-                </span>
-                <span className="font-medium text-emerald-300">
-                  {overview.demo.active}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Expiruje do 3 dnů
-                </span>
-                <span className="font-medium text-amber-300">
-                  {overview.demo.expiringSoon}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Expirované
-                </span>
-                <span className="font-medium text-rose-300">
-                  {overview.demo.expired}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Nedokončené žádosti
-                </span>
-                <span className="font-medium">
-                  {overview.demo.pendingRequests}
-                </span>
-              </div>
+            <div className="mt-6 space-y-4">
+              <Row label="Aktivní DEMO" value={overview.demo.active} tone="positive" />
+              <Row label="Expiruje do 3 dnů" value={overview.demo.expiringSoon} tone="warning" />
+              <Row label="Expirované" value={overview.demo.expired} tone="danger" />
+              <Row label="Nedokončené žádosti" value={overview.demo.pendingRequests} />
             </div>
           </section>
         </div>
 
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-          <h3 className="font-semibold">
-            Diagnostika
-          </h3>
+        <section className="mt-4 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-6">
+          <div className="text-[8px] font-black uppercase tracking-[0.14em] text-cyan-300">
+            Diagnostics
+          </div>
+          <h3 className="mt-2 text-lg font-black text-white">Diagnostika</h3>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500">
-                Supabase / DB
-              </p>
-
-              <p
-                className={`mt-2 font-medium ${statusClass(
-                  overview.database.status
-                )}`}
-              >
-                {overview.database.status === "ok"
-                  ? "OK"
-                  : "ERROR"}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500">
-                Analytický engine
-              </p>
-
-              <p className="mt-2 font-medium text-emerald-300">
-                Datová aktivita dostupná
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500">
-                DEMO workflow
-              </p>
-
-              <p className="mt-2 font-medium text-emerald-300">
-                Data dostupná
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500">
-                Snapshot
-              </p>
-
-              <p className="mt-2 text-sm font-medium text-slate-300">
-                {formatDate(overview.generatedAt)}
-              </p>
-            </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <DiagnosticCard
+              label="Supabase / DB"
+              value={overview.database.status === "ok" ? "OK" : "ERROR"}
+              tone={overview.database.status === "ok" ? "positive" : "danger"}
+            />
+            <DiagnosticCard
+              label="Analytický engine"
+              value="Datová aktivita dostupná"
+              tone="positive"
+            />
+            <DiagnosticCard
+              label="DEMO workflow"
+              value="Data dostupná"
+              tone="positive"
+            />
+            <DiagnosticCard
+              label="Snapshot"
+              value={formatDate(overview.generatedAt)}
+            />
           </div>
         </section>
 
-        <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 px-5 py-4">
-          <p className="text-xs leading-5 text-slate-500">
-            Tato stránka zatím ověřuje interní databázové a aplikační
-            signály. Přímé health-checky Sentinel Hub/Copernicus,
-            weather provideru, cron execution historie a error log
-            doplníme v další vrstvě observability.
+        <div className="mt-5 rounded-2xl border border-white/[0.06] bg-[#0a1016] px-5 py-4">
+          <div className="text-[7px] font-black uppercase tracking-[0.14em] text-slate-700">
+            Observability scope
+          </div>
+          <p className="mt-2 text-[9px] leading-5 text-slate-600">
+            Tato stránka zatím ověřuje interní databázové a aplikační signály.
+            Přímé health-checky Sentinel Hub/Copernicus, weather provideru,
+            cron execution historie a error log doplníme v další vrstvě
+            observability.
           </p>
         </div>
+      </main>
+    </div>
+  );
+}
+
+function DataPanel({
+  title,
+  subtitle,
+  rows,
+}: {
+  title: string;
+  subtitle: string;
+  rows: Array<[string, number]>;
+}) {
+  return (
+    <section className="rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-6">
+      <div className="text-[8px] font-black uppercase tracking-[0.14em] text-cyan-300">
+        Data Foundation
       </div>
-    </>
+      <h3 className="mt-2 text-lg font-black text-white">{title}</h3>
+      <p className="mt-1 text-[9px] text-slate-600">{subtitle}</p>
+
+      <div className="mt-6 space-y-4">
+        {rows.map(([label, value]) => (
+          <Row key={label} label={label} value={value} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Row({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "positive" | "warning" | "danger";
+}) {
+  const valueClass =
+    tone === "positive"
+      ? "text-emerald-300"
+      : tone === "warning"
+        ? "text-amber-300"
+        : tone === "danger"
+          ? "text-rose-300"
+          : "text-white";
+
+  return (
+    <div className="flex items-center justify-between border-b border-white/[0.04] pb-3 last:border-0 last:pb-0">
+      <span className="text-[10px] text-slate-500">{label}</span>
+      <span className={`text-[10px] font-black ${valueClass}`}>{value}</span>
+    </div>
+  );
+}
+
+function DiagnosticCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "positive" | "danger";
+}) {
+  const valueClass =
+    tone === "positive"
+      ? "text-emerald-300"
+      : tone === "danger"
+        ? "text-rose-300"
+        : "text-slate-300";
+
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-[#071017] p-4">
+      <div className="text-[7px] font-black uppercase tracking-[0.13em] text-slate-700">
+        {label}
+      </div>
+      <div className={`mt-2 text-[10px] font-black ${valueClass}`}>{value}</div>
+    </div>
   );
 }
