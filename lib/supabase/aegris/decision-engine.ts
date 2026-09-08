@@ -755,9 +755,12 @@ export function evaluateProjectContext(
     const max =
       stageMaxTemperature;
 
+    // Profil min–max je optimální/orientační pásmo, nikoli hranice
+    // okamžitého poškození. Kritický stav proto vyhlašujeme až při
+    // výrazné odchylce (8 °C) od profilu; menší odchylka je varování.
     if (
-      temperature < min - 3 ||
-      temperature > max + 3
+      temperature < min - 8 ||
+      temperature > max + 8
     ) {
       criticalCount++;
 
@@ -1144,31 +1147,37 @@ export function evaluateProjectContext(
           cropEt - precip
         );
 
-      // Vodní bilance je škálována vůči kritickému podílu
-      // denní potřeby vody. 0 % deficitu = 100 bodů;
-      // dosažení kritického deficitu = 0 bodů.
+      // 24h meteorologická bilance sama o sobě NEPROKAZUJE vodní stres:
+      // porost čerpá vodu ze zásoby v půdě a nulové srážky během jediného
+      // dne nejsou kritický stav. Proto zde 24h deficit funguje jako
+      // časný varovný signál. Skutečně kritický vodní stres musí potvrdit
+      // samostatný faktor půdní vlhkosti (FC/PWP nebo dostupný fallback).
       //
-      // Citlivost plodiny/fáze posouvá kritickou hranici:
-      // citlivější porost dosáhne 0 bodů při menším deficitu,
-      // méně citlivý porost při větším deficitu.
-      const criticalDeficitRatio =
-        0.30 /
+      // 0 % denního deficitu = 100 bodů.
+      // 100 % denního deficitu = přibližně 55 bodů při střední citlivosti.
+      // Citlivost fáze/plodiny upravuje pokles, ale samotná 24h bilance
+      // bez potvrzení z půdy neklesne do kritického pásma.
+      const dailyDeficitRatio =
+        cropEt > 0
+          ? Math.min(
+              1,
+              waterDeficit / cropEt
+            )
+          : 0;
+
+      const deficitPenalty =
+        45 *
         Math.max(
-          sensitivityFactor,
-          0.01
+          0.75,
+          Math.min(1.25, sensitivityFactor)
         );
 
       continuousWaterBalanceScore =
         cropEt > 0
           ? clampScore(
               100 -
-                (waterDeficit /
-                  cropEt /
-                  Math.max(
-                    criticalDeficitRatio,
-                    0.01
-                  )) *
-                  100
+                dailyDeficitRatio *
+                  deficitPenalty
             )
           : 100;
 
@@ -1176,10 +1185,18 @@ export function evaluateProjectContext(
       // Je samostatným kanonickým faktorem s vlastní vahou 15 %.
       // Tím se zabrání dvojímu započtení stejného půdního signálu.
 
+      const hasCriticalSoilEvidence =
+        factors.some(
+          (factor) =>
+            factor.label === "Vlhkost půdy" &&
+            factor.status === "Kritické"
+        );
+
       const waterStatus =
-        continuousWaterBalanceScore < 30
+        continuousWaterBalanceScore < 30 &&
+        hasCriticalSoilEvidence
           ? "Kritické"
-          : continuousWaterBalanceScore < 60
+          : continuousWaterBalanceScore < 65
             ? "Upozornění"
             : "OK";
 
@@ -1326,32 +1343,14 @@ export function evaluateProjectContext(
               : precip * 70
         );
 
+      // Bez ET₀ nelze z nízkých srážek samotných odvodit kritický
+      // vodní stres. Faktor proto může být nejvýše varovný.
       const waterStatus =
-        continuousWaterBalanceScore < 30
-          ? "Kritické"
-          : continuousWaterBalanceScore < 60
-            ? "Upozornění"
-            : "OK";
+        continuousWaterBalanceScore < 60
+          ? "Upozornění"
+          : "OK";
 
       if (
-        waterStatus ===
-        "Kritické"
-      ) {
-        criticalCount++;
-
-        factors.push({
-          label: "Vodní bilance",
-          status: "Kritické",
-          detail:
-            `Za 24 h se očekává pouze ${precip.toFixed(1)} mm srážek. ` +
-            `Pro přesnější výpočet chybí ET₀; Kc růstové fáze je ${cropCoefficient.toFixed(2)}. ` +
-            `Kontinuální skóre vodní bilance je ${continuousWaterBalanceScore.toFixed(1)} bodu.`,
-        });
-
-        actions.push(
-          "Prověřit vodní režim porostu; očekávané srážky jsou nízké a bez ET₀ nelze přesně určit vodní deficit."
-        );
-      } else if (
         waterStatus ===
         "Upozornění"
       ) {
@@ -1768,11 +1767,11 @@ export function evaluateProjectContext(
           deviation,
           [
             [0, 100],
-            [1, 85],
-            [2, 70],
-            [3, 55],
-            [4, 35],
-            [6, 0],
+            [1, 92],
+            [2, 82],
+            [3, 70],
+            [5, 50],
+            [8, 0],
           ]
         )
       );
@@ -2038,9 +2037,19 @@ export function evaluateProjectContext(
   const hasSufficientDataForOptimal =
     dataCompletenessPct >= 83;
 
-  if (criticalCount > 0) {
+  // Celkový stav kombinuje závažnost faktorů se skóre. Jeden izolovaný
+  // kritický faktor už automaticky nepřepne celý projekt na Kritické.
+  // Kritický projekt vyžaduje buď kritické celkové skóre, nebo souběh
+  // více kritických signálů, případně kritický signál + vysoké riziko.
+  const projectIsCritical =
+    score < 40 ||
+    criticalCount >= 2 ||
+    (criticalCount >= 1 && score < 55);
+
+  if (projectIsCritical) {
     level = "Kritické";
   } else if (
+    criticalCount > 0 ||
     warningCount > 0 ||
     score < 70 ||
     !hasSufficientDataForOptimal
