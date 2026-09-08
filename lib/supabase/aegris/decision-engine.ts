@@ -1196,7 +1196,7 @@ export function evaluateProjectContext(
         continuousWaterBalanceScore < 30 &&
         hasCriticalSoilEvidence
           ? "Kritické"
-          : continuousWaterBalanceScore < 65
+          : continuousWaterBalanceScore < 60
             ? "Upozornění"
             : "OK";
 
@@ -2119,6 +2119,15 @@ export function evaluateProjectContext(
     );
   }
 
+  const consistentActions =
+    actions.filter(
+      (action) =>
+        hasWaterWarning ||
+        !action
+          .toLowerCase()
+          .includes("vodní bilance")
+    );
+
   const prioritizedActions = [
     ...(hasWaterWarning
       ? [
@@ -2132,7 +2141,7 @@ export function evaluateProjectContext(
         ]
       : []),
 
-    ...actions,
+    ...consistentActions,
   ];
 
   const priority:

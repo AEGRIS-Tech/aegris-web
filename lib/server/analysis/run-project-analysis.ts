@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchProjectWeather } from "@/lib/server/weather";
 import {
@@ -721,18 +721,78 @@ export async function runProjectAnalysis({
     // SERVER-AUTHORITATIVE AEGRIS PERSISTENCE
     // ---------------------------------------------------------
     const analysisCreatedAt = new Date().toISOString();
+
+    /*
+     * Decision Engine nesmí spoléhat na to, které sloupce projektu
+     * předal volající route handler. Projektový agronomický kontext
+     * načteme těsně před vyhodnocením z databáze jako autoritativní
+     * stav konkrétního projektu.
+     *
+     * Tím mají serverová analýza a detail projektu stejný zdroj pro:
+     * - crop_catalog_id
+     * - crop_name
+     * - growth_stage
+     */
+    const {
+      data: decisionProjectData,
+      error: decisionProjectError,
+    } = await serviceSupabase
+      .from("projects")
+      .select("crop_catalog_id, crop_name, growth_stage")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (decisionProjectError) {
+      console.error(
+        "ANALYSIS DECISION PROJECT CONTEXT ERROR:",
+        decisionProjectError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Nepodařilo se načíst aktuální agronomický kontext projektu pro Decision Engine.",
+          code: "ANALYSIS_PROJECT_CONTEXT_FAILED",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!decisionProjectData) {
+      console.error(
+        "ANALYSIS DECISION PROJECT CONTEXT NOT FOUND:",
+        { projectId }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Projekt nebyl nalezen při načítání agronomického kontextu pro Decision Engine.",
+          code: "ANALYSIS_PROJECT_CONTEXT_NOT_FOUND",
+        },
+        { status: 404 }
+      );
+    }
+
     const cropName =
-      typeof project.crop_name === "string"
-        ? project.crop_name
-        : "";
-    const growthStage =
-      typeof project.growth_stage === "string"
-        ? project.growth_stage
+      typeof decisionProjectData.crop_name === "string"
+        ? decisionProjectData.crop_name
         : "";
 
+    const growthStage =
+      typeof decisionProjectData.growth_stage === "string"
+        ? decisionProjectData.growth_stage
+        : "";
+
+    const parsedCropCatalogId =
+      decisionProjectData.crop_catalog_id == null
+        ? null
+        : Number(decisionProjectData.crop_catalog_id);
+
     const cropCatalogId =
-      typeof project.crop_catalog_id === "number"
-        ? project.crop_catalog_id
+      parsedCropCatalogId != null &&
+      Number.isFinite(parsedCropCatalogId)
+        ? parsedCropCatalogId
         : null;
 
     let cropProfile: CropProfile | null = null;
@@ -861,6 +921,7 @@ export async function runProjectAnalysis({
       ndvi: item.ndvi,
       created_at: analysisCreatedAt,
     }));
+
 
     const recommendation = evaluateProjectContext(
       currentNdvi,
@@ -1107,3 +1168,4 @@ export async function runProjectAnalysis({
       rejectedIntervals,
     });
 }
+

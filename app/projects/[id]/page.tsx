@@ -71,6 +71,11 @@ type Analysis = {
   median_ndvi?: number | null;
   p05_ndvi?: number | null;
   p95_ndvi?: number | null;
+
+  // Autoritativní výsledek Decision Enginu uložený serverem
+  // společně s konkrétní analýzou.
+  decision_snapshot?: ContextEvaluation | null;
+  data_completeness_pct?: number | null;
 };
 
 import {
@@ -1025,7 +1030,17 @@ setAreaError("");
   const analysisWeather =
     analysisRecommendation?.weather_snapshot ?? weather;
 
-  const contextEvaluation = evaluateProjectContext(
+  /*
+   * Klientský přepočet je pouze backwards-compatible fallback.
+   * Pro novější analýzy je jediným autoritativním zdrojem
+   * `analysis.decision_snapshot`, který vznikl a byl uložen serverem
+   * ve stejném běhu jako analysis + recommendation + alert.
+   *
+   * Tím se zabrání míchání:
+   * - uloženého recommendation snapshotu
+   * - s nově přepočítanými faktory v browseru.
+   */
+  const fallbackContextEvaluation = evaluateProjectContext(
     analysis?.ndvi != null
       ? Number(analysis.ndvi)
       : null,
@@ -1038,34 +1053,59 @@ setAreaError("");
     soilProfile
   );
 
+  const persistedDecisionSnapshot =
+    analysis?.decision_snapshot &&
+    typeof analysis.decision_snapshot === "object"
+      ? analysis.decision_snapshot
+      : null;
+
+  const contextEvaluation =
+    persistedDecisionSnapshot ??
+    fallbackContextEvaluation;
+
   /*
-   * Uložený recommendation zůstává autoritativním snapshotem
-   * pro hlavní výstup analýzy. Pokud jde o starší záznam bez
-   * recommendation, použije se aktuální výsledek decision enginu.
+   * Priorita zdrojů pro hlavní zobrazení:
+   * 1) serverový decision_snapshot konkrétní analýzy,
+   * 2) uložený aegris_recommendation (starší kompatibilita),
+   * 3) klientský fallback přepočet (legacy bez snapshotů).
+   *
+   * U nové analýzy tak všechny části UI používají stejný výsledek.
    */
   const displayedLevel =
-    analysisRecommendation?.level ?? contextEvaluation.level;
+    persistedDecisionSnapshot?.level ??
+    analysisRecommendation?.level ??
+    contextEvaluation.level;
 
   const displayedPriority =
-    analysisRecommendation?.priority ?? contextEvaluation.priority;
+    persistedDecisionSnapshot?.priority ??
+    analysisRecommendation?.priority ??
+    contextEvaluation.priority;
 
   const displayedScore =
-    analysisRecommendation?.score != null
-      ? Number(analysisRecommendation.score)
-      : contextEvaluation.score;
+    persistedDecisionSnapshot?.score != null
+      ? Number(persistedDecisionSnapshot.score)
+      : analysisRecommendation?.score != null
+        ? Number(analysisRecommendation.score)
+        : contextEvaluation.score;
 
   const displayedSummary =
-    analysisRecommendation?.summary || contextEvaluation.summary;
+    persistedDecisionSnapshot?.summary ||
+    analysisRecommendation?.summary ||
+    contextEvaluation.summary;
 
   const displayedRecommendation =
+    persistedDecisionSnapshot?.recommendation ||
     analysisRecommendation?.recommendation ||
     contextEvaluation.recommendation;
 
   const displayedActions =
-    Array.isArray(analysisRecommendation?.actions) &&
-    analysisRecommendation.actions.length > 0
-      ? analysisRecommendation.actions
-      : contextEvaluation.actions;
+    Array.isArray(persistedDecisionSnapshot?.actions) &&
+    persistedDecisionSnapshot.actions.length > 0
+      ? persistedDecisionSnapshot.actions
+      : Array.isArray(analysisRecommendation?.actions) &&
+          analysisRecommendation.actions.length > 0
+        ? analysisRecommendation.actions
+        : contextEvaluation.actions;
 
   const mainReasonFactor =
     contextEvaluation.factors.find((factor) => factor.status === "Kritické") ??
@@ -1277,15 +1317,19 @@ setAreaError("");
                         : `Hlavní důvod: ${mainReasonLabel}`}
                     </div>
                   </div>
-                  <div className="p-3"><div className="text-[8px] uppercase tracking-widest text-slate-500">AEGRIS RIZIKO</div><div className={`mt-1 text-lg font-black ${priorityClass}`}>{displayedLevel === "Bez vyhodnocení" ? "—" : contextEvaluation.scoreLevel}</div><div className="text-[8px] text-slate-500">Priorita {displayedPriority}</div></div>
+                  <div className="p-3"><div className="text-[8px] uppercase tracking-widest text-slate-500">KONDICE POROSTU</div><div className={`mt-1 text-lg font-black ${priorityClass}`}>{displayedLevel === "Bez vyhodnocení" ? "—" : contextEvaluation.scoreLevel}</div><div className="text-[8px] text-slate-500">Priorita {displayedPriority}</div></div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-slate-500">
                   <span>Poslední analýza: {analysis ? new Date(analysis.created_at).toLocaleString("cs-CZ") : "—"}</span>
-                  {analysisRecommendation?.weather_snapshot && (
+                  {persistedDecisionSnapshot ? (
                     <span className="text-cyan-500/70">
-                      AEGRIS vyhodnocení používá uložený snapshot podmínek
+                      AEGRIS zobrazuje uložený serverový decision snapshot
                     </span>
-                  )}
+                  ) : analysisRecommendation?.weather_snapshot ? (
+                    <span className="text-cyan-500/70">
+                      Legacy analýza používá uložený snapshot podmínek
+                    </span>
+                  ) : null}
                 </div>
                 {organizationRole === "viewer" ? (
                   <div className="mt-3 rounded-lg border border-white/[0.07] bg-[#071017] py-2.5 text-center text-[9px] font-bold text-slate-500">
