@@ -119,6 +119,109 @@ type AegrisAlert = {
   created_at: string;
 };
 
+
+type ProjectFertilizationInputs = {
+  project_id: number;
+  planned_yield_t_ha: number | null;
+  soil_p_mg_kg: number | null;
+  soil_k_mg_kg: number | null;
+  soil_mg_mg_kg: number | null;
+  soil_ph: number | null;
+  soil_texture_class: "light" | "medium" | "heavy" | null;
+  phosphorus_method: "SP" | "ICP-OES" | null;
+  predecessor_crop_name: string | null;
+  predecessor_group: string | null;
+  organic_fertilizer_type: string | null;
+  organic_livestock_type: string | null;
+  organic_rate_t_ha: number | null;
+  organic_application_window: string | null;
+  organic_year_after_application: number | null;
+  nmin_kg_ha: number | null;
+  data_source: string | null;
+  notes: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type CropNutrientRequirement = {
+  id: number;
+  crop_profile_id: number;
+  nutrient: "N" | "P" | "K" | "Mg" | string;
+  nutrient_form: string;
+  yield_level: "low" | "medium" | "high" | null;
+  soil_supply_class:
+    | "low"
+    | "satisfactory"
+    | "good"
+    | "high"
+    | "very_high"
+    | null;
+  demand_group: number | null;
+  dose_kg_ha: number | null;
+  min_dose_kg_ha: number | null;
+  max_dose_kg_ha: number | null;
+  recommendation_type: string;
+  source_table: string | null;
+  source_note: string | null;
+};
+
+type CropYieldLevel = {
+  id: number;
+  crop_profile_id: number;
+  yield_level: "low" | "medium" | "high";
+  min_yield_t_ha: number | null;
+  max_yield_t_ha: number | null;
+  source_table: string | null;
+  notes: string | null;
+};
+
+type CropNitrogenSplit = {
+  id: number;
+  crop_profile_id: number;
+  application_stage: string;
+  application_order: number;
+  share_percent: number;
+  source_table: string | null;
+  notes: string | null;
+};
+
+type NitrogenPredecessorAdjustment = {
+  predecessor_group: string;
+  yield_level: "low" | "medium" | "high";
+  adjustment_kg_n_ha: number;
+};
+
+type OrganicNitrogenCredit = {
+  fertilizer_type: string;
+  livestock_type: string | null;
+  application_window: string;
+  year_after_application: number;
+  effective_n_kg_per_t: number;
+};
+
+type SoilNutrientClassificationRule = {
+  id: number;
+  land_use: string;
+  nutrient: "P" | "K" | "Mg" | string;
+  analytical_method: "SP" | "ICP-OES" | null;
+  soil_texture_class: "light" | "medium" | "heavy" | null;
+  supply_class:
+    | "low"
+    | "satisfactory"
+    | "good"
+    | "high"
+    | "very_high";
+  min_mg_kg: number | null;
+  max_mg_kg: number | null;
+};
+
+type PotassiumMagnesiumCorrection = {
+  ratio_min: number | null;
+  ratio_max: number | null;
+  correction_factor: number;
+  description: string;
+};
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -156,11 +259,380 @@ export default function ProjectDetailPage() {
   const [farmingMethod, setFarmingMethod] = useState("");
   const [growthStage, setGrowthStage] = useState("");
 
+  const [fertilizationInputs, setFertilizationInputs] =
+    useState<ProjectFertilizationInputs | null>(null);
+  const [nutrientRequirements, setNutrientRequirements] =
+    useState<CropNutrientRequirement[]>([]);
+  const [fertilizationYieldLevels, setFertilizationYieldLevels] =
+    useState<CropYieldLevel[]>([]);
+  const [nitrogenSplits, setNitrogenSplits] =
+    useState<CropNitrogenSplit[]>([]);
+  const [predecessorAdjustments, setPredecessorAdjustments] =
+    useState<NitrogenPredecessorAdjustment[]>([]);
+  const [organicNitrogenCredits, setOrganicNitrogenCredits] =
+    useState<OrganicNitrogenCredit[]>([]);
+  const [soilNutrientClassificationRules, setSoilNutrientClassificationRules] =
+    useState<SoilNutrientClassificationRule[]>([]);
+  const [potassiumMagnesiumCorrections, setPotassiumMagnesiumCorrections] =
+    useState<PotassiumMagnesiumCorrection[]>([]);
+  const [fertilizationEditorOpen, setFertilizationEditorOpen] =
+    useState(false);
+  const [loadingFertilization, setLoadingFertilization] = useState(false);
+  const [savingFertilization, setSavingFertilization] = useState(false);
+  const [fertilizationError, setFertilizationError] = useState("");
+
+  const [plannedYield, setPlannedYield] = useState("");
+  const [soilP, setSoilP] = useState("");
+  const [soilK, setSoilK] = useState("");
+  const [soilMg, setSoilMg] = useState("");
+  const [fertilizationSoilPh, setFertilizationSoilPh] = useState("");
+  const [soilTextureClass, setSoilTextureClass] = useState("");
+  const [phosphorusMethod, setPhosphorusMethod] = useState("");
+  const [predecessorCropName, setPredecessorCropName] = useState("");
+  const [predecessorGroup, setPredecessorGroup] = useState("");
+  const [organicFertilizerType, setOrganicFertilizerType] = useState("");
+  const [organicLivestockType, setOrganicLivestockType] = useState("");
+  const [organicRate, setOrganicRate] = useState("");
+  const [organicApplicationWindow, setOrganicApplicationWindow] = useState("");
+  const [organicYearAfterApplication, setOrganicYearAfterApplication] =
+    useState("");
+  const [nmin, setNmin] = useState("");
+  const [fertilizationDataSource, setFertilizationDataSource] = useState("");
+  const [fertilizationNotes, setFertilizationNotes] = useState("");
+
   const [savingCrop, setSavingCrop] = useState(false);
   const [cropEditorOpen, setCropEditorOpen] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const analysisRunRef = useRef(false);
   const loadRequestRef = useRef(0);
+
+  function setFertilizationForm(
+    value: ProjectFertilizationInputs | null
+  ) {
+    setPlannedYield(
+      value?.planned_yield_t_ha != null
+        ? String(value.planned_yield_t_ha)
+        : ""
+    );
+    setSoilP(
+      value?.soil_p_mg_kg != null ? String(value.soil_p_mg_kg) : ""
+    );
+    setSoilK(
+      value?.soil_k_mg_kg != null ? String(value.soil_k_mg_kg) : ""
+    );
+    setSoilMg(
+      value?.soil_mg_mg_kg != null ? String(value.soil_mg_mg_kg) : ""
+    );
+    setFertilizationSoilPh(
+      value?.soil_ph != null ? String(value.soil_ph) : ""
+    );
+    setSoilTextureClass(value?.soil_texture_class ?? "");
+    setPhosphorusMethod(value?.phosphorus_method ?? "");
+    setPredecessorCropName(value?.predecessor_crop_name ?? "");
+    setPredecessorGroup(value?.predecessor_group ?? "");
+    setOrganicFertilizerType(value?.organic_fertilizer_type ?? "");
+    setOrganicLivestockType(value?.organic_livestock_type ?? "");
+    setOrganicRate(
+      value?.organic_rate_t_ha != null
+        ? String(value.organic_rate_t_ha)
+        : ""
+    );
+    setOrganicApplicationWindow(value?.organic_application_window ?? "");
+    setOrganicYearAfterApplication(
+      value?.organic_year_after_application != null
+        ? String(value.organic_year_after_application)
+        : ""
+    );
+    setNmin(value?.nmin_kg_ha != null ? String(value.nmin_kg_ha) : "");
+    setFertilizationDataSource(value?.data_source ?? "");
+    setFertilizationNotes(value?.notes ?? "");
+  }
+
+  async function loadFertilizationData(
+    projectId: number,
+    cropProfileId: number | null
+  ) {
+    setLoadingFertilization(true);
+    setFertilizationError("");
+
+    try {
+      const [
+        inputResult,
+        predecessorResult,
+        organicCreditResult,
+        classificationResult,
+        potassiumMagnesiumResult,
+      ] = await Promise.all([
+        supabase
+          .from("project_fertilization_inputs")
+          .select("*")
+          .eq("project_id", projectId)
+          .maybeSingle(),
+        supabase
+          .from("nitrogen_predecessor_adjustments")
+          .select("predecessor_group, yield_level, adjustment_kg_n_ha"),
+        supabase
+          .from("organic_fertilizer_n_credits")
+          .select(
+            "fertilizer_type, livestock_type, application_window, year_after_application, effective_n_kg_per_t"
+          ),
+        supabase
+          .from("soil_nutrient_classification_rules")
+          .select(
+            "id, land_use, nutrient, analytical_method, soil_texture_class, supply_class, min_mg_kg, max_mg_kg"
+          )
+          .eq("land_use", "arable"),
+        supabase
+          .from("potassium_magnesium_corrections")
+          .select("ratio_min, ratio_max, correction_factor, description"),
+      ]);
+
+      if (inputResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ VSTUPŮ HNOJENÍ:",
+          inputResult.error
+        );
+        setFertilizationError(
+          "Vstupy pro hnojení se nepodařilo načíst."
+        );
+      } else {
+        const inputs =
+          (inputResult.data ?? null) as ProjectFertilizationInputs | null;
+        setFertilizationInputs(inputs);
+        setFertilizationForm(inputs);
+      }
+
+      if (predecessorResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ KOREKCÍ PŘEDPLODINY:",
+          predecessorResult.error
+        );
+        setPredecessorAdjustments([]);
+      } else {
+        setPredecessorAdjustments(
+          (predecessorResult.data ?? []) as NitrogenPredecessorAdjustment[]
+        );
+      }
+
+      if (organicCreditResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ KOREKCÍ ORGANICKÉHO N:",
+          organicCreditResult.error
+        );
+        setOrganicNitrogenCredits([]);
+      } else {
+        setOrganicNitrogenCredits(
+          (organicCreditResult.data ?? []) as OrganicNitrogenCredit[]
+        );
+      }
+
+      if (classificationResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ KLASIFIKACE P/K/Mg:",
+          classificationResult.error
+        );
+        setSoilNutrientClassificationRules([]);
+      } else {
+        setSoilNutrientClassificationRules(
+          (classificationResult.data ?? []) as SoilNutrientClassificationRule[]
+        );
+      }
+
+      if (potassiumMagnesiumResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ KOREKCÍ K:Mg:",
+          potassiumMagnesiumResult.error
+        );
+        setPotassiumMagnesiumCorrections([]);
+      } else {
+        setPotassiumMagnesiumCorrections(
+          (potassiumMagnesiumResult.data ?? []) as PotassiumMagnesiumCorrection[]
+        );
+      }
+
+      if (cropProfileId == null) {
+        setNutrientRequirements([]);
+        setFertilizationYieldLevels([]);
+        setNitrogenSplits([]);
+        return;
+      }
+
+      const [requirementsResult, yieldLevelsResult, splitsResult] =
+        await Promise.all([
+          supabase
+            .from("crop_nutrient_requirements")
+            .select("*")
+            .eq("crop_profile_id", cropProfileId),
+          supabase
+            .from("crop_yield_levels")
+            .select("*")
+            .eq("crop_profile_id", cropProfileId),
+          supabase
+            .from("crop_nitrogen_splits")
+            .select("*")
+            .eq("crop_profile_id", cropProfileId)
+            .order("application_order", { ascending: true }),
+        ]);
+
+      if (requirementsResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ VÝŽIVOVÉHO PROFILU:",
+          requirementsResult.error
+        );
+        setNutrientRequirements([]);
+      } else {
+        setNutrientRequirements(
+          (requirementsResult.data ?? []) as CropNutrientRequirement[]
+        );
+      }
+
+      if (yieldLevelsResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ VÝNOSOVÝCH ÚROVNÍ:",
+          yieldLevelsResult.error
+        );
+        setFertilizationYieldLevels([]);
+      } else {
+        setFertilizationYieldLevels(
+          (yieldLevelsResult.data ?? []) as CropYieldLevel[]
+        );
+      }
+
+      if (splitsResult.error) {
+        console.error(
+          "CHYBA NAČTENÍ DĚLENÍ DUSÍKU:",
+          splitsResult.error
+        );
+        setNitrogenSplits([]);
+      } else {
+        setNitrogenSplits(
+          (splitsResult.data ?? []) as CropNitrogenSplit[]
+        );
+      }
+    } finally {
+      setLoadingFertilization(false);
+    }
+  }
+
+  async function saveFertilizationInputs() {
+    if (!project || organizationRole === "viewer") return;
+
+    const parseOptionalNumber = (value: string) => {
+      if (!value.trim()) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    };
+
+    const payload = {
+      project_id: project.id,
+      planned_yield_t_ha: parseOptionalNumber(plannedYield),
+      soil_p_mg_kg: parseOptionalNumber(soilP),
+      soil_k_mg_kg: parseOptionalNumber(soilK),
+      soil_mg_mg_kg: parseOptionalNumber(soilMg),
+      soil_ph: parseOptionalNumber(fertilizationSoilPh),
+      soil_texture_class:
+        soilTextureClass === "light" ||
+        soilTextureClass === "medium" ||
+        soilTextureClass === "heavy"
+          ? soilTextureClass
+          : null,
+      phosphorus_method:
+        phosphorusMethod === "SP" || phosphorusMethod === "ICP-OES"
+          ? phosphorusMethod
+          : null,
+      predecessor_crop_name: predecessorCropName.trim() || null,
+      predecessor_group: predecessorGroup || null,
+      organic_fertilizer_type: organicFertilizerType || null,
+      organic_livestock_type:
+        organicFertilizerType === "kejda"
+          ? organicLivestockType || null
+          : null,
+      organic_rate_t_ha: parseOptionalNumber(organicRate),
+      organic_application_window: organicApplicationWindow || null,
+      organic_year_after_application:
+        organicYearAfterApplication
+          ? Number(organicYearAfterApplication)
+          : null,
+      nmin_kg_ha: parseOptionalNumber(nmin),
+      data_source: fertilizationDataSource.trim() || null,
+      notes: fertilizationNotes.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const numericValues = [
+      payload.planned_yield_t_ha,
+      payload.soil_p_mg_kg,
+      payload.soil_k_mg_kg,
+      payload.soil_mg_mg_kg,
+      payload.soil_ph,
+      payload.organic_rate_t_ha,
+      payload.nmin_kg_ha,
+    ];
+
+    if (numericValues.some((value) => Number.isNaN(value))) {
+      setFertilizationError(
+        "Číselné hodnoty výživy musí být zadané jako platná čísla."
+      );
+      return;
+    }
+
+    if (
+      payload.planned_yield_t_ha != null &&
+      payload.planned_yield_t_ha <= 0
+    ) {
+      setFertilizationError("Plánovaný výnos musí být větší než 0.");
+      return;
+    }
+
+    if (
+      payload.soil_ph != null &&
+      (payload.soil_ph < 0 || payload.soil_ph > 14)
+    ) {
+      setFertilizationError("pH musí být v rozsahu 0 až 14.");
+      return;
+    }
+
+    if (payload.soil_p_mg_kg != null && !payload.phosphorus_method) {
+      setFertilizationError(
+        "Pro klasifikaci fosforu vyberte metodu stanovení P (SP nebo ICP-OES)."
+      );
+      return;
+    }
+
+    if (
+      (payload.soil_k_mg_kg != null || payload.soil_mg_mg_kg != null) &&
+      !payload.soil_texture_class
+    ) {
+      setFertilizationError(
+        "Pro klasifikaci K a Mg vyberte půdní druh (lehká / střední / těžká)."
+      );
+      return;
+    }
+
+    setSavingFertilization(true);
+    setFertilizationError("");
+
+    const { data, error } = await supabase
+      .from("project_fertilization_inputs")
+      .upsert(payload, { onConflict: "project_id" })
+      .select("*")
+      .maybeSingle();
+
+    if (error || !data) {
+      console.error("CHYBA ULOŽENÍ VSTUPŮ HNOJENÍ:", error);
+      setFertilizationError(
+        "Vstupy pro hnojení se nepodařilo uložit."
+      );
+      setSavingFertilization(false);
+      return;
+    }
+
+    const saved = data as ProjectFertilizationInputs;
+    setFertilizationInputs(saved);
+    setFertilizationForm(saved);
+    setSavingFertilization(false);
+    setFertilizationEditorOpen(false);
+  }
 
   async function loadCropProfiles() {
     const { data, error } = await supabase
@@ -934,6 +1406,16 @@ setAreaError("");
           ) ?? null
         : null;
 
+  useEffect(() => {
+    if (!project) return;
+
+    void loadFertilizationData(
+      project.id,
+      selectedCropProfile?.id ?? null
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, selectedCropProfile?.id]);
+
   const selectedCropStageProfile =
     selectedCropProfile && growthStage
       ? cropStageProfiles.find(
@@ -960,6 +1442,239 @@ setAreaError("");
     !availableGrowthStages.includes(growthStage)
       ? [growthStage, ...availableGrowthStages]
       : availableGrowthStages;
+
+  const plannedYieldNumber =
+    fertilizationInputs?.planned_yield_t_ha != null
+      ? Number(fertilizationInputs.planned_yield_t_ha)
+      : null;
+
+  const fertilizationYieldLevel =
+    plannedYieldNumber != null
+      ? fertilizationYieldLevels.find((item) => {
+          const minOk =
+            item.min_yield_t_ha == null ||
+            plannedYieldNumber >= Number(item.min_yield_t_ha);
+          const maxOk =
+            item.max_yield_t_ha == null ||
+            plannedYieldNumber <= Number(item.max_yield_t_ha);
+          return minOk && maxOk;
+        })?.yield_level ?? null
+      : null;
+
+  const nitrogenRequirement = fertilizationYieldLevel
+    ? nutrientRequirements.find(
+        (item) =>
+          item.nutrient === "N" &&
+          item.yield_level === fertilizationYieldLevel
+      ) ?? null
+    : null;
+
+  const predecessorAdjustment =
+    fertilizationYieldLevel && fertilizationInputs?.predecessor_group
+      ? predecessorAdjustments.find(
+          (item) =>
+            item.predecessor_group ===
+              fertilizationInputs.predecessor_group &&
+            item.yield_level === fertilizationYieldLevel
+        ) ?? null
+      : null;
+
+  const organicNitrogenCredit = (() => {
+    if (
+      !fertilizationInputs?.organic_fertilizer_type ||
+      fertilizationInputs.organic_rate_t_ha == null ||
+      !fertilizationInputs.organic_application_window ||
+      fertilizationInputs.organic_year_after_application == null
+    ) {
+      return null;
+    }
+
+    const rule = organicNitrogenCredits.find(
+      (item) =>
+        item.fertilizer_type ===
+          fertilizationInputs.organic_fertilizer_type &&
+        (item.livestock_type ?? null) ===
+          (fertilizationInputs.organic_fertilizer_type === "kejda"
+            ? fertilizationInputs.organic_livestock_type ?? null
+            : null) &&
+        item.application_window ===
+          fertilizationInputs.organic_application_window &&
+        Number(item.year_after_application) ===
+          Number(fertilizationInputs.organic_year_after_application)
+    );
+
+    if (!rule) return null;
+
+    return (
+      Number(rule.effective_n_kg_per_t) *
+      Number(fertilizationInputs.organic_rate_t_ha)
+    );
+  })();
+
+  const calculatedNitrogenDose = (() => {
+    if (nitrogenRequirement?.dose_kg_ha == null) return null;
+
+    let value = Number(nitrogenRequirement.dose_kg_ha);
+
+    if (predecessorAdjustment) {
+      value += Number(predecessorAdjustment.adjustment_kg_n_ha);
+    }
+
+    if (organicNitrogenCredit != null) {
+      value -= organicNitrogenCredit;
+    }
+
+    const minimum =
+      nitrogenRequirement.min_dose_kg_ha != null
+        ? Number(nitrogenRequirement.min_dose_kg_ha)
+        : null;
+
+    if (minimum != null) value = Math.max(minimum, value);
+
+    return Math.max(0, value);
+  })();
+
+  const classifySoilNutrient = (
+    nutrient: "P" | "K" | "Mg",
+    value: number | null
+  ) => {
+    if (value == null || !Number.isFinite(value)) return null;
+
+    const method =
+      nutrient === "P" ? fertilizationInputs?.phosphorus_method ?? null : null;
+    const texture =
+      nutrient === "P" ? null : fertilizationInputs?.soil_texture_class ?? null;
+
+    if (nutrient === "P" && !method) return null;
+    if (nutrient !== "P" && !texture) return null;
+
+    const candidates = soilNutrientClassificationRules
+      .filter(
+        (rule) =>
+          rule.nutrient === nutrient &&
+          (nutrient !== "P" || rule.analytical_method === method) &&
+          (nutrient === "P" || rule.soil_texture_class === texture)
+      )
+      .sort((a, b) => {
+        const aMax = a.max_mg_kg == null ? Number.POSITIVE_INFINITY : Number(a.max_mg_kg);
+        const bMax = b.max_mg_kg == null ? Number.POSITIVE_INFINITY : Number(b.max_mg_kg);
+        return aMax - bMax;
+      });
+
+    return (
+      candidates.find(
+        (rule) => rule.max_mg_kg == null || value <= Number(rule.max_mg_kg)
+      ) ?? null
+    );
+  };
+
+  const phosphorusClassification = classifySoilNutrient(
+    "P",
+    fertilizationInputs?.soil_p_mg_kg != null
+      ? Number(fertilizationInputs.soil_p_mg_kg)
+      : null
+  );
+
+  const potassiumClassification = classifySoilNutrient(
+    "K",
+    fertilizationInputs?.soil_k_mg_kg != null
+      ? Number(fertilizationInputs.soil_k_mg_kg)
+      : null
+  );
+
+  const magnesiumClassification = classifySoilNutrient(
+    "Mg",
+    fertilizationInputs?.soil_mg_mg_kg != null
+      ? Number(fertilizationInputs.soil_mg_mg_kg)
+      : null
+  );
+
+  const nutrientDoseFor = (
+    nutrient: "P" | "K" | "Mg",
+    supplyClass: CropNutrientRequirement["soil_supply_class"]
+  ) => {
+    if (!fertilizationYieldLevel || !supplyClass) return null;
+    return (
+      nutrientRequirements.find(
+        (item) =>
+          item.nutrient === nutrient &&
+          item.yield_level === fertilizationYieldLevel &&
+          item.soil_supply_class === supplyClass
+      ) ?? null
+    );
+  };
+
+  const phosphorusRequirement = nutrientDoseFor(
+    "P",
+    phosphorusClassification?.supply_class ?? null
+  );
+  const potassiumRequirement = nutrientDoseFor(
+    "K",
+    potassiumClassification?.supply_class ?? null
+  );
+  const magnesiumRequirement = nutrientDoseFor(
+    "Mg",
+    magnesiumClassification?.supply_class ?? null
+  );
+
+  const potassiumMagnesiumRatio =
+    fertilizationInputs?.soil_k_mg_kg != null &&
+    fertilizationInputs?.soil_mg_mg_kg != null &&
+    Number(fertilizationInputs.soil_mg_mg_kg) > 0
+      ? Number(fertilizationInputs.soil_k_mg_kg) /
+        Number(fertilizationInputs.soil_mg_mg_kg)
+      : null;
+
+  const potassiumMagnesiumCorrection = (() => {
+    if (potassiumMagnesiumRatio == null) return null;
+
+    return (
+      [...potassiumMagnesiumCorrections]
+        .sort((a, b) => {
+          const aMax = a.ratio_max == null ? Number.POSITIVE_INFINITY : Number(a.ratio_max);
+          const bMax = b.ratio_max == null ? Number.POSITIVE_INFINITY : Number(b.ratio_max);
+          return aMax - bMax;
+        })
+        .find(
+          (rule) =>
+            rule.ratio_max == null ||
+            potassiumMagnesiumRatio <= Number(rule.ratio_max)
+        ) ?? null
+    );
+  })();
+
+  const calculatedPhosphorusDose =
+    phosphorusRequirement?.dose_kg_ha != null
+      ? Number(phosphorusRequirement.dose_kg_ha)
+      : null;
+
+  const calculatedMagnesiumDose =
+    magnesiumRequirement?.dose_kg_ha != null
+      ? Number(magnesiumRequirement.dose_kg_ha)
+      : null;
+
+  const calculatedPotassiumDose =
+    potassiumRequirement?.dose_kg_ha != null
+      ? Number(potassiumRequirement.dose_kg_ha) *
+        Number(potassiumMagnesiumCorrection?.correction_factor ?? 1)
+      : null;
+
+  const supplyClassLabel = (
+    value: SoilNutrientClassificationRule["supply_class"] | undefined
+  ) => {
+    if (value === "low") return "nízká";
+    if (value === "satisfactory") return "vyhovující";
+    if (value === "good") return "dobrá";
+    if (value === "high") return "vysoká";
+    if (value === "very_high") return "velmi vysoká";
+    return "—";
+  };
+
+  const nutritionProfileAvailable = nutrientRequirements.length > 0;
+  const hasSoilLaboratoryInputs =
+    fertilizationInputs?.soil_p_mg_kg != null ||
+    fertilizationInputs?.soil_k_mg_kg != null ||
+    fertilizationInputs?.soil_mg_mg_kg != null;
 
   const chartHistory = buildCanonicalNdviHistory(
     ndviHistory,
@@ -1601,7 +2316,333 @@ setAreaError("");
           {weather ? <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4"><div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3"><div className="text-[8px] text-slate-500">Teplota</div><div className="mt-1 text-lg font-black text-orange-400">{weather.temperature_c != null ? `${weather.temperature_c.toFixed(1)} °C` : "—"}</div><div className={`text-[8px] ${temperatureStatusClass}`}>{temperatureStatus}</div></div><div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3"><div className="text-[8px] text-slate-500">Vlhkost</div><div className="mt-1 text-lg font-black text-cyan-300">{weather.humidity_pct != null ? `${weather.humidity_pct.toFixed(0)} %` : "—"}</div><div className="text-[8px] text-cyan-300">Aktuální</div></div><div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3"><div className="text-[8px] text-slate-500">Srážky – poslední hodina</div><div className="mt-1 text-lg font-black">{weather.precipitation_mm != null ? `${weather.precipitation_mm.toFixed(1)} mm` : "—"}</div><div className="text-[8px] text-slate-500">Aktuální</div></div><div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3"><div className="text-[8px] text-slate-500">Vítr</div><div className="mt-1 text-lg font-black">{weather.wind_speed_kmh != null ? `${weather.wind_speed_kmh.toFixed(1)} km/h` : "—"}</div><div className="text-[8px] text-emerald-400">Aktuální</div></div></div> : <div className="mt-3 text-[9px] text-slate-500">{loadingWeather ? "Načítám počasí..." : "Počasí se nepodařilo načíst."}</div>}
         </section>
 
-        {/* 6. PROJECT DATA */}
+        {/* 6. NUTRITION / FERTILIZATION */}
+        <section className="mt-3 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
+                AEGRIS AGRONOMY · VÝŽIVA A HNOJENÍ
+              </div>
+              <h2 className="mt-1 text-sm font-black">
+                METODICKÝ PROFIL VÝŽIVY PLODINY
+              </h2>
+              <p className="mt-1 max-w-3xl text-[9px] leading-4 text-slate-500">
+                Výpočet vychází z metodiky ÚKZÚZ. AEGRIS nezobrazuje
+                konkrétní dávku tam, kde chybí vstupy potřebné pro její
+                bezpečné stanovení.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-md border px-2 py-1 text-[8px] font-black ${
+                  nutritionProfileAvailable
+                    ? "border-emerald-500/25 bg-emerald-500/5 text-emerald-400"
+                    : "border-amber-500/25 bg-amber-500/5 text-amber-400"
+                }`}
+              >
+                {nutritionProfileAvailable
+                  ? "Výživový profil dostupný"
+                  : "Výživový profil není dostupný"}
+              </span>
+              {organizationRole !== "viewer" && (
+                <button
+                  type="button"
+                  onClick={() => setFertilizationEditorOpen((value) => !value)}
+                  className="rounded-lg border border-white/[0.08] bg-[#071017] px-3 py-2 text-[8px] font-bold text-cyan-300 hover:border-cyan-300/30"
+                >
+                  {fertilizationEditorOpen
+                    ? "Zavřít vstupy"
+                    : "✎ Doplnit vstupy"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {fertilizationError && (
+            <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.04] p-3 text-[9px] text-red-300">
+              {fertilizationError}
+            </div>
+          )}
+
+          {loadingFertilization ? (
+            <div className="mt-3 rounded-lg border border-white/[0.07] bg-[#071017] p-4 text-[9px] text-slate-500">
+              Načítám výživový profil…
+            </div>
+          ) : (
+            <>
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Plánovaný výnos</div>
+                  <div className="mt-1 text-lg font-black text-cyan-300">
+                    {plannedYieldNumber != null ? `${plannedYieldNumber.toFixed(2)} t/ha` : "—"}
+                  </div>
+                  <div className="mt-1 text-[8px] text-slate-500">
+                    {fertilizationYieldLevel === "low" ? "Nízká výnosová úroveň" : fertilizationYieldLevel === "medium" ? "Střední výnosová úroveň" : fertilizationYieldLevel === "high" ? "Vysoká výnosová úroveň" : "Nutné pro výpočet výživy"}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Dusík N</div>
+                  <div className="mt-1 text-lg font-black text-emerald-400">
+                    {calculatedNitrogenDose != null ? `${calculatedNitrogenDose.toFixed(0)} kg N/ha` : "—"}
+                  </div>
+                  <div className="mt-1 text-[8px] leading-4 text-slate-500">
+                    {nitrogenRequirement ? `Základ ${Number(nitrogenRequirement.dose_kg_ha).toFixed(0)} · minimum ${Number(nitrogenRequirement.min_dose_kg_ha ?? 0).toFixed(0)} kg N/ha` : "Chybí plánovaný výnos."}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Fosfor P₂O₅</div>
+                  <div className="mt-1 text-lg font-black text-violet-300">
+                    {calculatedPhosphorusDose != null ? `${calculatedPhosphorusDose.toFixed(0)} kg/ha` : "—"}
+                  </div>
+                  <div className="mt-1 text-[8px] leading-4 text-slate-500">
+                    {fertilizationInputs?.soil_p_mg_kg != null ? `${fertilizationInputs.soil_p_mg_kg} mg/kg · ${supplyClassLabel(phosphorusClassification?.supply_class)} · ${fertilizationInputs.phosphorus_method ?? "metoda neuvedena"}` : "Chybí půdní rozbor P."}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Draslík K₂O</div>
+                  <div className="mt-1 text-lg font-black text-amber-300">
+                    {calculatedPotassiumDose != null ? `${calculatedPotassiumDose.toFixed(0)} kg/ha` : "—"}
+                  </div>
+                  <div className="mt-1 text-[8px] leading-4 text-slate-500">
+                    {fertilizationInputs?.soil_k_mg_kg != null ? `${fertilizationInputs.soil_k_mg_kg} mg/kg · ${supplyClassLabel(potassiumClassification?.supply_class)}` : "Chybí půdní rozbor K."}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Hořčík MgO</div>
+                  <div className="mt-1 text-lg font-black text-sky-300">
+                    {calculatedMagnesiumDose != null ? `${calculatedMagnesiumDose.toFixed(0)} kg/ha` : "—"}
+                  </div>
+                  <div className="mt-1 text-[8px] leading-4 text-slate-500">
+                    {fertilizationInputs?.soil_mg_mg_kg != null ? `${fertilizationInputs.soil_mg_mg_kg} mg/kg · ${supplyClassLabel(magnesiumClassification?.supply_class)}` : "Chybí půdní rozbor Mg."}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-600">Zdroj metodiky</div>
+                  <div className="mt-1 text-[10px] font-black text-slate-200">ÚKZÚZ · 6. vydání · 2020</div>
+                  <div className="mt-1 text-[8px] leading-4 text-slate-500">Tab. 6, 15–17 a metodická korekce K:Mg.</div>
+                </div>
+              </div>
+
+              {hasSoilLaboratoryInputs && (
+                <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                  <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                    <div className="text-[8px] font-black uppercase tracking-widest text-cyan-300">Klasifikace půdní zásobenosti</div>
+                    <div className="mt-2 text-[8px] leading-4 text-slate-500">
+                      P: <span className="font-bold text-slate-300">{supplyClassLabel(phosphorusClassification?.supply_class)}</span> · K: <span className="font-bold text-slate-300">{supplyClassLabel(potassiumClassification?.supply_class)}</span> · Mg: <span className="font-bold text-slate-300">{supplyClassLabel(magnesiumClassification?.supply_class)}</span>
+                    </div>
+                    <div className="mt-1 text-[8px] text-slate-600">
+                      Půdní druh: {fertilizationInputs?.soil_texture_class === "light" ? "lehká" : fertilizationInputs?.soil_texture_class === "medium" ? "střední" : fertilizationInputs?.soil_texture_class === "heavy" ? "těžká" : "neuveden"}. Metoda P: {fertilizationInputs?.phosphorus_method ?? "neuvedena"}.
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                    <div className="text-[8px] font-black uppercase tracking-widest text-cyan-300">Poměr K : Mg</div>
+                    <div className="mt-1 text-lg font-black text-slate-200">
+                      {potassiumMagnesiumRatio != null ? potassiumMagnesiumRatio.toFixed(2) : "—"}
+                    </div>
+                    <div className="mt-1 text-[8px] leading-4 text-slate-500">
+                      {potassiumMagnesiumCorrection ? `${potassiumMagnesiumCorrection.description} Koeficient K ${Number(potassiumMagnesiumCorrection.correction_factor).toFixed(2)}.` : "Pro korekci je nutné zadat K i Mg."}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {nitrogenRequirement && (
+                <div className="mt-2 grid gap-2 lg:grid-cols-3">
+                  <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3">
+                    <div className="text-[8px] font-black uppercase tracking-widest text-cyan-300">
+                      Korekce N
+                    </div>
+                    <div className="mt-2 space-y-1 text-[8px] leading-4 text-slate-500">
+                      <div>
+                        Předplodina: {predecessorAdjustment
+                          ? `${Number(
+                              predecessorAdjustment.adjustment_kg_n_ha
+                            ).toFixed(0)} kg N/ha`
+                          : "bez započtené korekce"}
+                      </div>
+                      <div>
+                        Organické hnojení: {organicNitrogenCredit != null
+                          ? `−${organicNitrogenCredit.toFixed(1)} kg N/ha`
+                          : "bez započteného odpočtu"}
+                      </div>
+                      <div>
+                        Nmin: {fertilizationInputs?.nmin_kg_ha != null
+                          ? `${fertilizationInputs.nmin_kg_ha} kg/ha – uložen jako zpřesňující údaj, není automaticky odečítán`
+                          : "neuveden"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-white/[0.07] bg-[#071017] p-3 lg:col-span-2">
+                    <div className="text-[8px] font-black uppercase tracking-widest text-cyan-300">
+                      Rámcové dělení dusíku
+                    </div>
+                    {nitrogenSplits.length > 0 ? (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {nitrogenSplits.map((split) => (
+                          <div
+                            key={split.id}
+                            className="rounded-md bg-[#050b10] px-3 py-2"
+                          >
+                            <div className="text-[8px] text-slate-500">
+                              {split.application_stage}
+                            </div>
+                            <div className="mt-1 text-sm font-black text-slate-200">
+                              {Number(split.share_percent).toFixed(0)} %
+                            </div>
+                            <div className="text-[8px] text-slate-600">
+                              {calculatedNitrogenDose != null
+                                ? `≈ ${((
+                                    calculatedNitrogenDose *
+                                    Number(split.share_percent)
+                                  ) /
+                                    100
+                                  ).toFixed(0)} kg N/ha`
+                                : "dávku nelze vyčíslit"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[8px] text-slate-500">
+                        Pro tuto plodinu není dělení N v databázi dostupné.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!plannedYieldNumber && nutritionProfileAvailable && (
+                <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3 text-[9px] leading-4 text-amber-200">
+                  Pro konkrétní doporučení dusíku doplňte plánovaný výnos.
+                  AEGRIS bez tohoto vstupu dávku neodhaduje.
+                </div>
+              )}
+            </>
+          )}
+
+          {organizationRole !== "viewer" && fertilizationEditorOpen && (
+            <div className="mt-3 rounded-xl border border-cyan-400/15 bg-[#071017] p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                Vstupy pro výpočet výživy
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <label className="text-[9px] text-slate-500">
+                  Plánovaný výnos (t/ha)
+                  <input type="number" step="0.01" value={plannedYield} onChange={(event) => setPlannedYield(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Půdní druh pro K / Mg
+                  <select value={soilTextureClass} onChange={(event) => setSoilTextureClass(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Vyberte</option>
+                    <option value="light">Lehká půda</option>
+                    <option value="medium">Střední půda</option>
+                    <option value="heavy">Těžká půda</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Metoda stanovení P
+                  <select value={phosphorusMethod} onChange={(event) => setPhosphorusMethod(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Vyberte</option>
+                    <option value="SP">SP</option>
+                    <option value="ICP-OES">ICP-OES</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  P v půdě (mg/kg)
+                  <input type="number" step="0.01" value={soilP} onChange={(event) => setSoilP(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  K v půdě (mg/kg)
+                  <input type="number" step="0.01" value={soilK} onChange={(event) => setSoilK(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Mg v půdě (mg/kg)
+                  <input type="number" step="0.01" value={soilMg} onChange={(event) => setSoilMg(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  pH půdy
+                  <input type="number" step="0.01" value={fertilizationSoilPh} onChange={(event) => setFertilizationSoilPh(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Předplodina
+                  <input value={predecessorCropName} onChange={(event) => setPredecessorCropName(event.target.value)} placeholder="např. jetel" className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Skupina předplodiny
+                  <select value={predecessorGroup} onChange={(event) => setPredecessorGroup(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Bez korekce / jiná</option>
+                    <option value="jeteloviny">Jeteloviny</option>
+                    <option value="luskoviny">Luskoviny</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Nmin (kg/ha)
+                  <input type="number" step="0.01" value={nmin} onChange={(event) => setNmin(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Organické hnojivo
+                  <select value={organicFertilizerType} onChange={(event) => { setOrganicFertilizerType(event.target.value); if (event.target.value !== "kejda") setOrganicLivestockType(""); }} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Bez odpočtu</option>
+                    <option value="hnůj">Hnůj</option>
+                    <option value="močůvka">Močůvka</option>
+                    <option value="kejda">Kejda</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Druh kejdy
+                  <select disabled={organicFertilizerType !== "kejda"} value={organicLivestockType} onChange={(event) => setOrganicLivestockType(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white disabled:opacity-40">
+                    <option value="">Vyberte</option>
+                    <option value="skot">Skot</option>
+                    <option value="prasata">Prasata</option>
+                    <option value="drůbež">Drůbež</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Dávka organického hnojiva (t/ha)
+                  <input type="number" step="0.01" value={organicRate} onChange={(event) => setOrganicRate(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Období aplikace
+                  <select value={organicApplicationWindow} onChange={(event) => setOrganicApplicationWindow(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Vyberte</option>
+                    <option value="VIII-IX">VIII–IX</option>
+                    <option value="X-II">X–II</option>
+                    <option value="III-VII">III–VII</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500">
+                  Rok účinku organického N
+                  <select value={organicYearAfterApplication} onChange={(event) => setOrganicYearAfterApplication(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white">
+                    <option value="">Vyberte</option>
+                    <option value="1">1. rok</option>
+                    <option value="2">2. rok</option>
+                  </select>
+                </label>
+                <label className="text-[9px] text-slate-500 xl:col-span-2">
+                  Zdroj údajů
+                  <input value={fertilizationDataSource} onChange={(event) => setFertilizationDataSource(event.target.value)} placeholder="např. AZP 2026 / laboratorní rozbor" className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+                <label className="text-[9px] text-slate-500 xl:col-span-2">
+                  Poznámka
+                  <input value={fertilizationNotes} onChange={(event) => setFertilizationNotes(event.target.value)} className="mt-1 w-full rounded-lg border border-white/[0.10] bg-[#050b10] px-3 py-2 text-xs text-white" />
+                </label>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button type="button" onClick={saveFertilizationInputs} disabled={savingFertilization} className="rounded-lg bg-cyan-300 px-5 py-2.5 text-[9px] font-black text-slate-950 hover:bg-cyan-200 disabled:opacity-50">
+                  {savingFertilization ? "Ukládám…" : "💾 Uložit vstupy výživy"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 7. PROJECT DATA */}
         <section className="mt-3 grid gap-3 xl:grid-cols-12">
           <div className="rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4 xl:col-span-4">
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">DETAILY PROJEKTU</div>
@@ -1789,7 +2830,7 @@ setAreaError("");
         </section>
         )}
 
-        {/* 7. PROJECT TIMELINE — no duplicate chart */}
+        {/* 8. PROJECT TIMELINE — no duplicate chart */}
         <section id="project-history" className="mt-3 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4">
           <div className="flex items-center justify-between gap-3"><div><div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">VÝVOJ PROJEKTU</div><h2 className="mt-1 text-base font-black">Historie událostí</h2></div><span className={`text-[9px] font-black ${recommendationTrend.className}`}>{recommendationTrend.icon} {recommendationTrend.label}</span></div>
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
