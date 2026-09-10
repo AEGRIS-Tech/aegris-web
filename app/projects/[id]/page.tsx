@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import ProjectMap from "./ProjectMap";
 import AnalysisChart from "./AnalysisChart";
 import FieldValidationForm from "./FieldValidationForm";
+import AiAgronom from "./AiAgronom";
 
 type Project = {
   id: number;
@@ -2282,6 +2283,8 @@ setAreaError("");
           </div>
           <div className="xl:col-span-7 rounded-[22px] border border-white/[0.07] bg-[#0a1016] p-4"><div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">KLÍČOVÉ FAKTORY</div><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{contextEvaluation.factors.slice(0, 6).map((factor, index) => { const scoreItem = contextEvaluation.scoreBreakdown.find((item) => item.label === factor.label); return <div key={`${factor.label}-${index}`} className="rounded-lg border border-white/[0.07] bg-[#071017] p-3"><div className="flex items-start justify-between gap-2"><div className="text-[9px] font-semibold leading-4 text-slate-300">{factor.label}</div><span className={`rounded-full px-2 py-1 text-[7px] font-black ${factor.status === "OK" ? "bg-emerald-500/10 text-emerald-400" : factor.status === "Upozornění" ? "bg-amber-500/10 text-amber-400" : factor.status === "Kritické" ? "bg-red-500/10 text-red-400" : "bg-slate-500/10 text-slate-400"}`}>{factor.status === "OK" ? "V NORMĚ" : factor.status}</span></div>{scoreItem && <div className="mt-2 text-[8px] font-bold text-cyan-300">Skóre {scoreItem.score}/100 · váha {scoreItem.weight}%</div>}<p className="mt-2 text-[8px] leading-4 text-slate-500">{factor.detail}</p></div>})}</div></div>
         </section>
+
+        <AiAgronom projectId={project.id} />
 
         {analysis && (
           <FieldValidationForm
