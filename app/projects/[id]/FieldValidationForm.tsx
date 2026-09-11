@@ -26,8 +26,10 @@ type FieldValidation = {
   validated_by: string;
   validation_result: ValidationResult;
   actual_cause: ActualCause | null;
+  observed_severity: number | null;
   observed_at: string;
   note: string | null;
+  prediction_snapshot: unknown | null;
   created_at: string;
   updated_at: string;
 };
@@ -100,6 +102,15 @@ const CAUSE_OPTIONS: Array<{
   },
 ];
 
+const SEVERITY_OPTIONS = [
+  { value: 0, label: "0", description: "Bez problému" },
+  { value: 1, label: "1", description: "Velmi nízká" },
+  { value: 2, label: "2", description: "Nízká" },
+  { value: 3, label: "3", description: "Střední" },
+  { value: 4, label: "4", description: "Vysoká" },
+  { value: 5, label: "5", description: "Velmi vysoká" },
+] as const;
+
 function getTodayDate() {
   const now = new Date();
   const offset = now.getTimezoneOffset();
@@ -120,6 +131,9 @@ export default function FieldValidationForm({
 
   const [actualCause, setActualCause] =
     useState<ActualCause | "">("");
+
+  const [observedSeverity, setObservedSeverity] =
+    useState<number | null>(null);
 
   const [observedAt, setObservedAt] =
     useState(getTodayDate());
@@ -179,11 +193,17 @@ export default function FieldValidationForm({
         if (validation) {
           setValidationResult(validation.validation_result);
           setActualCause(validation.actual_cause ?? "");
+          setObservedSeverity(
+            typeof validation.observed_severity === "number"
+              ? validation.observed_severity
+              : null
+          );
           setObservedAt(validation.observed_at);
           setNote(validation.note ?? "");
         } else {
           setValidationResult(null);
           setActualCause("");
+          setObservedSeverity(null);
           setObservedAt(getTodayDate());
           setNote("");
         }
@@ -246,6 +266,7 @@ export default function FieldValidationForm({
             alertId,
             validationResult,
             actualCause: actualCause || null,
+            observedSeverity,
             observedAt,
             note,
           }),
@@ -265,6 +286,11 @@ export default function FieldValidationForm({
         payload?.validation as FieldValidation;
 
       setSavedValidation(validation);
+      setObservedSeverity(
+        typeof validation.observed_severity === "number"
+          ? validation.observed_severity
+          : null
+      );
 
       setSuccessMessage(
         "Terénní ověření bylo uloženo."
@@ -433,6 +459,66 @@ export default function FieldValidationForm({
             className="mt-2 w-full rounded-lg border border-white/[0.07] bg-[#071017] px-3 py-2.5 text-[10px] text-slate-200 outline-none transition focus:border-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="text-[8px] font-black uppercase tracking-[0.16em] text-slate-500">
+              Skutečná závažnost nálezu
+            </div>
+            <div className="mt-1 text-[8px] leading-4 text-slate-600">
+              0 = bez problému · 5 = velmi závažný stav
+            </div>
+          </div>
+
+          {observedSeverity !== null && (
+            <div className="rounded-md border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1 text-[8px] font-black text-cyan-300">
+              ZÁVAŽNOST {observedSeverity}/5
+            </div>
+          )}
+        </div>
+
+        <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-6">
+          {SEVERITY_OPTIONS.map((option) => {
+            const selected =
+              observedSeverity === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                disabled={readOnly || saving}
+                onClick={() =>
+                  setObservedSeverity(option.value)
+                }
+                className={`rounded-lg border px-2 py-3 text-center transition ${
+                  selected
+                    ? "border-cyan-300/60 bg-cyan-300/10 text-cyan-200"
+                    : "border-white/[0.07] bg-[#071017] text-slate-500 hover:border-cyan-300/30 hover:text-slate-300"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <div className="text-base font-black">
+                  {option.label}
+                </div>
+                <div className="mt-1 text-[7px] leading-3">
+                  {option.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {observedSeverity !== null && (
+          <button
+            type="button"
+            disabled={readOnly || saving}
+            onClick={() => setObservedSeverity(null)}
+            className="mt-2 text-[8px] font-bold text-slate-600 transition hover:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Zrušit volbu závažnosti
+          </button>
+        )}
       </div>
 
       <div className="mt-3">

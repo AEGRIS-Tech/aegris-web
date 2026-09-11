@@ -32,8 +32,45 @@ type FieldValidationPayload = {
   alertId?: unknown;
   validationResult?: unknown;
   actualCause?: unknown;
+  observedSeverity?: unknown;
   observedAt?: unknown;
   note?: unknown;
+};
+
+type AnalysisSnapshotSource = {
+  id: number;
+  project_id: number;
+  ndvi: number | string | null;
+  vegetation: number | null;
+  risk: string | null;
+  created_at: string;
+  period_from: string | null;
+  period_to: string | null;
+  source_provider: string | null;
+  satellite: string | null;
+  satellite_product: string | null;
+  spatial_resolution_m: number | null;
+  analysis_crs: string | null;
+  analysis_utm_zone: number | null;
+  geometry_pixel_count: number | null;
+  valid_pixel_count: number | null;
+  valid_geometry_pct: number | string | null;
+  accepted_intervals: number | null;
+  rejected_intervals: number | null;
+  quality_gate_pct: number | string | null;
+  median_ndvi: number | string | null;
+  p05_ndvi: number | string | null;
+  p95_ndvi: number | string | null;
+  engine_version: string | null;
+  ruleset_version: string | null;
+  input_snapshot: unknown;
+  decision_snapshot: unknown;
+  data_completeness_pct: number | string | null;
+};
+
+type ExistingValidationSnapshot = {
+  id: number;
+  prediction_snapshot: unknown | null;
 };
 
 function createSupabase(cookieStore: Awaited<ReturnType<typeof cookies>>) {
@@ -83,6 +120,27 @@ function parseOptionalPositiveInteger(
   const parsed = parsePositiveInteger(value);
 
   return parsed ?? "invalid";
+}
+
+function parseObservedSeverity(
+  value: unknown
+): number | null | "invalid" {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 5) {
+    return "invalid";
+  }
+
+  return parsed;
 }
 
 function isValidationResult(value: unknown): value is ValidationResult {
@@ -160,8 +218,10 @@ export async function GET(request: Request) {
           "validated_by",
           "validation_result",
           "actual_cause",
+          "observed_severity",
           "observed_at",
           "note",
+          "prediction_snapshot",
           "created_at",
           "updated_at",
         ].join(",")
@@ -231,6 +291,10 @@ export async function POST(request: Request) {
 
     const alertId = parseOptionalPositiveInteger(body.alertId);
 
+    const observedSeverity = parseObservedSeverity(
+      body.observedSeverity
+    );
+
     if (!projectId) {
       return NextResponse.json(
         { error: "Chybí nebo je neplatné ID projektu." },
@@ -255,6 +319,16 @@ export async function POST(request: Request) {
     if (alertId === "invalid") {
       return NextResponse.json(
         { error: "Neplatné ID upozornění." },
+        { status: 400 }
+      );
+    }
+
+    if (observedSeverity === "invalid") {
+      return NextResponse.json(
+        {
+          error:
+            "Závažnost terénního nálezu musí být celé číslo od 0 do 5.",
+        },
         { status: 400 }
       );
     }
@@ -382,9 +456,40 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: analysis, error: analysisError } = await supabase
+    const { data: analysisData, error: analysisError } = await supabase
       .from("analysis")
-      .select("id, project_id")
+      .select(
+        [
+          "id",
+          "project_id",
+          "ndvi",
+          "vegetation",
+          "risk",
+          "created_at",
+          "period_from",
+          "period_to",
+          "source_provider",
+          "satellite",
+          "satellite_product",
+          "spatial_resolution_m",
+          "analysis_crs",
+          "analysis_utm_zone",
+          "geometry_pixel_count",
+          "valid_pixel_count",
+          "valid_geometry_pct",
+          "accepted_intervals",
+          "rejected_intervals",
+          "quality_gate_pct",
+          "median_ndvi",
+          "p05_ndvi",
+          "p95_ndvi",
+          "engine_version",
+          "ruleset_version",
+          "input_snapshot",
+          "decision_snapshot",
+          "data_completeness_pct",
+        ].join(",")
+      )
       .eq("id", analysisId)
       .eq("project_id", projectId)
       .maybeSingle();
@@ -400,6 +505,9 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    const analysis =
+      analysisData as unknown as AnalysisSnapshotSource | null;
 
     if (!analysis) {
       return NextResponse.json(
@@ -477,6 +585,70 @@ export async function POST(request: Request) {
       }
     }
 
+    const {
+      data: existingValidationData,
+      error: existingValidationError,
+    } = await supabase
+      .from("field_validations")
+      .select("id, prediction_snapshot")
+      .eq("analysis_id", analysisId)
+      .eq("validated_by", user.id)
+      .maybeSingle();
+
+    if (existingValidationError) {
+      console.error(
+        "FIELD VALIDATION EXISTING LOOKUP ERROR:",
+        existingValidationError
+      );
+
+      return NextResponse.json(
+        { error: "Nepodařilo se ověřit existující terénní ověření." },
+        { status: 500 }
+      );
+    }
+
+    const existingValidation =
+      existingValidationData as unknown as ExistingValidationSnapshot | null;
+
+    const predictionSnapshot =
+      existingValidation?.prediction_snapshot ??
+      {
+        schema_version: 1,
+        captured_at: new Date().toISOString(),
+        project_id: projectId,
+        analysis_id: analysisId,
+        analysis: {
+          created_at: analysis.created_at,
+          period_from: analysis.period_from,
+          period_to: analysis.period_to,
+          source_provider: analysis.source_provider,
+          satellite: analysis.satellite,
+          satellite_product: analysis.satellite_product,
+          spatial_resolution_m: analysis.spatial_resolution_m,
+          analysis_crs: analysis.analysis_crs,
+          analysis_utm_zone: analysis.analysis_utm_zone,
+          geometry_pixel_count: analysis.geometry_pixel_count,
+          valid_pixel_count: analysis.valid_pixel_count,
+          valid_geometry_pct: analysis.valid_geometry_pct,
+          accepted_intervals: analysis.accepted_intervals,
+          rejected_intervals: analysis.rejected_intervals,
+          quality_gate_pct: analysis.quality_gate_pct,
+          ndvi: analysis.ndvi,
+          median_ndvi: analysis.median_ndvi,
+          p05_ndvi: analysis.p05_ndvi,
+          p95_ndvi: analysis.p95_ndvi,
+          vegetation: analysis.vegetation,
+          risk: analysis.risk,
+          data_completeness_pct: analysis.data_completeness_pct,
+        },
+        engine: {
+          engine_version: analysis.engine_version,
+          ruleset_version: analysis.ruleset_version,
+        },
+        input_snapshot: analysis.input_snapshot,
+        decision_snapshot: analysis.decision_snapshot,
+      };
+
     const { data: savedValidation, error: saveError } = await supabase
       .from("field_validations")
       .upsert(
@@ -488,8 +660,10 @@ export async function POST(request: Request) {
           validated_by: user.id,
           validation_result: body.validationResult,
           actual_cause: actualCause,
+          observed_severity: observedSeverity,
           observed_at: body.observedAt,
           note,
+          prediction_snapshot: predictionSnapshot,
         },
         {
           onConflict: "analysis_id,validated_by",
@@ -505,8 +679,10 @@ export async function POST(request: Request) {
           "validated_by",
           "validation_result",
           "actual_cause",
+          "observed_severity",
           "observed_at",
           "note",
+          "prediction_snapshot",
           "created_at",
           "updated_at",
         ].join(",")
