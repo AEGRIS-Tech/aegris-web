@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useLanguage } from "../../context/LanguageContext";
 
 import Map, {
   NavigationControl,
@@ -59,15 +60,658 @@ type Country = {
 };
 
 const countries: Country[] = [
-  { name: "Česko", iso3: "CZE", latitude: 49.8175, longitude: 15.473, zoom: 7 },
-  { name: "Slovensko", iso3: "SVK", latitude: 48.669, longitude: 19.699, zoom: 7 },
-  { name: "Německo", iso3: "DEU", latitude: 51.1657, longitude: 10.4515, zoom: 6 },
-  { name: "Rakousko", iso3: "AUT", latitude: 47.5162, longitude: 14.5501, zoom: 7 },
-  { name: "Polsko", iso3: "POL", latitude: 51.9194, longitude: 19.1451, zoom: 6 },
-  { name: "Francie", iso3: "FRA", latitude: 46.2276, longitude: 2.2137, zoom: 6 },
-  { name: "Itálie", iso3: "ITA", latitude: 41.8719, longitude: 12.5674, zoom: 6 },
-  { name: "Španělsko", iso3: "ESP", latitude: 40.4637, longitude: -3.7492, zoom: 6 },
+  { name: "Czechia", iso3: "CZE", latitude: 49.8175, longitude: 15.473, zoom: 7 },
+  { name: "Slovakia", iso3: "SVK", latitude: 48.669, longitude: 19.699, zoom: 7 },
+  { name: "Germany", iso3: "DEU", latitude: 51.1657, longitude: 10.4515, zoom: 6 },
+  { name: "Austria", iso3: "AUT", latitude: 47.5162, longitude: 14.5501, zoom: 7 },
+  { name: "Poland", iso3: "POL", latitude: 51.9194, longitude: 19.1451, zoom: 6 },
+  { name: "France", iso3: "FRA", latitude: 46.2276, longitude: 2.2137, zoom: 6 },
+  { name: "Italy", iso3: "ITA", latitude: 41.8719, longitude: 12.5674, zoom: 6 },
+  { name: "Spain", iso3: "ESP", latitude: 40.4637, longitude: -3.7492, zoom: 6 },
 ];
+
+function getWorldMapCopy(language: string) {
+  const copies = {
+    cs: {
+      countries: {
+        CZE: "Česko",
+        SVK: "Slovensko",
+        DEU: "Německo",
+        AUT: "Rakousko",
+        POL: "Polsko",
+        FRA: "Francie",
+        ITA: "Itálie",
+        ESP: "Španělsko",
+      } as Record<string, string>,
+      satellite: "SATELIT",
+      map: "MAPA",
+      markBoundary: "📐 Označte hranici pozemku",
+      points: "Body",
+      critical: "Kritická",
+      high: "Vysoká",
+      medium: "Střední",
+      low: "Nízká",
+      back: "↶ Zpět",
+      clear: "🗑 Smazat",
+      completeBoundary: "✓ Dokončit hranici",
+      boundaryMinimum: "Pro dokončení hranice označ alespoň 3 body.",
+      openField: "Otevřít pozemek",
+      noPriority: "Bez priority",
+    },
+    en: {
+      countries: {
+        CZE: "Czechia",
+        SVK: "Slovakia",
+        DEU: "Germany",
+        AUT: "Austria",
+        POL: "Poland",
+        FRA: "France",
+        ITA: "Italy",
+        ESP: "Spain",
+      } as Record<string, string>,
+      satellite: "SATELLITE",
+      map: "MAP",
+      markBoundary: "📐 Mark the field boundary",
+      points: "Points",
+      critical: "Critical",
+      high: "High",
+      medium: "Medium",
+      low: "Low",
+      back: "↶ Back",
+      clear: "🗑 Clear",
+      completeBoundary: "✓ Complete boundary",
+      boundaryMinimum: "Mark at least 3 points to complete the boundary.",
+      openField: "Open field",
+      noPriority: "No priority",
+    },
+    sk: {
+      countries: {
+        CZE: "Česko",
+        SVK: "Slovensko",
+        DEU: "Nemecko",
+        AUT: "Rakúsko",
+        POL: "Poľsko",
+        FRA: "Francúzsko",
+        ITA: "Taliansko",
+        ESP: "Španielsko",
+      } as Record<string, string>,
+      satellite: "SATELIT",
+      map: "MAPA",
+      markBoundary: "📐 Označte hranicu pozemku",
+      points: "Body",
+      critical: "Kritická",
+      high: "Vysoká",
+      medium: "Stredná",
+      low: "Nízka",
+      back: "↶ Späť",
+      clear: "🗑 Vymazať",
+      completeBoundary: "✓ Dokončiť hranicu",
+      boundaryMinimum: "Na dokončenie hranice označte aspoň 3 body.",
+      openField: "Otvoriť pozemok",
+      noPriority: "Bez priority",
+    },
+    de: {
+      countries: {
+        CZE: "Tschechien",
+        SVK: "Slowakei",
+        DEU: "Deutschland",
+        AUT: "Österreich",
+        POL: "Polen",
+        FRA: "Frankreich",
+        ITA: "Italien",
+        ESP: "Spanien",
+      } as Record<string, string>,
+      satellite: "SATELLIT",
+      map: "KARTE",
+      markBoundary: "📐 Feldgrenze markieren",
+      points: "Punkte",
+      critical: "Kritisch",
+      high: "Hoch",
+      medium: "Mittel",
+      low: "Niedrig",
+      back: "↶ Zurück",
+      clear: "🗑 Löschen",
+      completeBoundary: "✓ Grenze abschließen",
+      boundaryMinimum: "Markieren Sie mindestens 3 Punkte, um die Grenze abzuschließen.",
+      openField: "Feld öffnen",
+      noPriority: "Keine Priorität",
+    },
+    pl: {
+      countries: {
+        CZE: "Czechy",
+        SVK: "Słowacja",
+        DEU: "Niemcy",
+        AUT: "Austria",
+        POL: "Polska",
+        FRA: "Francja",
+        ITA: "Włochy",
+        ESP: "Hiszpania",
+      } as Record<string, string>,
+      satellite: "SATELITA",
+      map: "MAPA",
+      markBoundary: "📐 Zaznacz granicę pola",
+      points: "Punkty",
+      critical: "Krytyczny",
+      high: "Wysoki",
+      medium: "Średni",
+      low: "Niski",
+      back: "↶ Wstecz",
+      clear: "🗑 Wyczyść",
+      completeBoundary: "✓ Zakończ granicę",
+      boundaryMinimum: "Zaznacz co najmniej 3 punkty, aby zakończyć granicę.",
+      openField: "Otwórz pole",
+      noPriority: "Brak priorytetu",
+    },
+    fr: {
+      countries: {
+        CZE: "Tchéquie",
+        SVK: "Slovaquie",
+        DEU: "Allemagne",
+        AUT: "Autriche",
+        POL: "Pologne",
+        FRA: "France",
+        ITA: "Italie",
+        ESP: "Espagne",
+      } as Record<string, string>,
+      satellite: "SATELLITE",
+      map: "CARTE",
+      markBoundary: "📐 Marquer la limite de la parcelle",
+      points: "Points",
+      critical: "Critique",
+      high: "Élevée",
+      medium: "Moyenne",
+      low: "Faible",
+      back: "↶ Retour",
+      clear: "🗑 Effacer",
+      completeBoundary: "✓ Terminer la limite",
+      boundaryMinimum: "Marquez au moins 3 points pour terminer la limite.",
+      openField: "Ouvrir la parcelle",
+      noPriority: "Aucune priorité",
+    },
+    es: {
+      countries: {
+        CZE: "Chequia",
+        SVK: "Eslovaquia",
+        DEU: "Alemania",
+        AUT: "Austria",
+        POL: "Polonia",
+        FRA: "Francia",
+        ITA: "Italia",
+        ESP: "España",
+      } as Record<string, string>,
+      satellite: "SATÉLITE",
+      map: "MAPA",
+      markBoundary: "📐 Marcar el límite de la parcela",
+      points: "Puntos",
+      critical: "Crítica",
+      high: "Alta",
+      medium: "Media",
+      low: "Baja",
+      back: "↶ Atrás",
+      clear: "🗑 Borrar",
+      completeBoundary: "✓ Completar límite",
+      boundaryMinimum: "Marca al menos 3 puntos para completar el límite.",
+      openField: "Abrir parcela",
+      noPriority: "Sin prioridad",
+    },
+    it: {
+      countries: {
+        CZE: "Cechia",
+        SVK: "Slovacchia",
+        DEU: "Germania",
+        AUT: "Austria",
+        POL: "Polonia",
+        FRA: "Francia",
+        ITA: "Italia",
+        ESP: "Spagna",
+      } as Record<string, string>,
+      satellite: "SATELLITE",
+      map: "MAPPA",
+      markBoundary: "📐 Segna il confine dell’appezzamento",
+      points: "Punti",
+      critical: "Critica",
+      high: "Alta",
+      medium: "Media",
+      low: "Bassa",
+      back: "↶ Indietro",
+      clear: "🗑 Cancella",
+      completeBoundary: "✓ Completa confine",
+      boundaryMinimum: "Segna almeno 3 punti per completare il confine.",
+      openField: "Apri appezzamento",
+      noPriority: "Nessuna priorità",
+    },
+    nl: {
+      countries: {
+        CZE: "Tsjechië",
+        SVK: "Slowakije",
+        DEU: "Duitsland",
+        AUT: "Oostenrijk",
+        POL: "Polen",
+        FRA: "Frankrijk",
+        ITA: "Italië",
+        ESP: "Spanje",
+      } as Record<string, string>,
+      satellite: "SATELLIET",
+      map: "KAART",
+      markBoundary: "📐 Markeer de perceelgrens",
+      points: "Punten",
+      critical: "Kritiek",
+      high: "Hoog",
+      medium: "Gemiddeld",
+      low: "Laag",
+      back: "↶ Terug",
+      clear: "🗑 Wissen",
+      completeBoundary: "✓ Grens voltooien",
+      boundaryMinimum: "Markeer minimaal 3 punten om de grens te voltooien.",
+      openField: "Perceel openen",
+      noPriority: "Geen prioriteit",
+    },
+    pt: {
+      countries: {
+        CZE: "Chéquia",
+        SVK: "Eslováquia",
+        DEU: "Alemanha",
+        AUT: "Áustria",
+        POL: "Polónia",
+        FRA: "França",
+        ITA: "Itália",
+        ESP: "Espanha",
+      } as Record<string, string>,
+      satellite: "SATÉLITE",
+      map: "MAPA",
+      markBoundary: "📐 Marcar o limite da parcela",
+      points: "Pontos",
+      critical: "Crítica",
+      high: "Alta",
+      medium: "Média",
+      low: "Baixa",
+      back: "↶ Voltar",
+      clear: "🗑 Limpar",
+      completeBoundary: "✓ Concluir limite",
+      boundaryMinimum: "Marque pelo menos 3 pontos para concluir o limite.",
+      openField: "Abrir parcela",
+      noPriority: "Sem prioridade",
+    },
+    ro: {
+      countries: {
+        CZE: "Cehia",
+        SVK: "Slovacia",
+        DEU: "Germania",
+        AUT: "Austria",
+        POL: "Polonia",
+        FRA: "Franța",
+        ITA: "Italia",
+        ESP: "Spania",
+      } as Record<string, string>,
+      satellite: "SATELIT",
+      map: "HARTĂ",
+      markBoundary: "📐 Marcați limita parcelei",
+      points: "Puncte",
+      critical: "Critică",
+      high: "Ridicată",
+      medium: "Medie",
+      low: "Scăzută",
+      back: "↶ Înapoi",
+      clear: "🗑 Șterge",
+      completeBoundary: "✓ Finalizează limita",
+      boundaryMinimum: "Marcați cel puțin 3 puncte pentru a finaliza limita.",
+      openField: "Deschide parcela",
+      noPriority: "Fără prioritate",
+    },
+    hu: {
+      countries: {
+        CZE: "Csehország",
+        SVK: "Szlovákia",
+        DEU: "Németország",
+        AUT: "Ausztria",
+        POL: "Lengyelország",
+        FRA: "Franciaország",
+        ITA: "Olaszország",
+        ESP: "Spanyolország",
+      } as Record<string, string>,
+      satellite: "MŰHOLD",
+      map: "TÉRKÉP",
+      markBoundary: "📐 Tábla határának kijelölése",
+      points: "Pontok",
+      critical: "Kritikus",
+      high: "Magas",
+      medium: "Közepes",
+      low: "Alacsony",
+      back: "↶ Vissza",
+      clear: "🗑 Törlés",
+      completeBoundary: "✓ Határ befejezése",
+      boundaryMinimum: "A határ befejezéséhez jelöljön meg legalább 3 pontot.",
+      openField: "Tábla megnyitása",
+      noPriority: "Nincs prioritás",
+    },
+    uk: {
+      countries: {
+        CZE: "Чехія",
+        SVK: "Словаччина",
+        DEU: "Німеччина",
+        AUT: "Австрія",
+        POL: "Польща",
+        FRA: "Франція",
+        ITA: "Італія",
+        ESP: "Іспанія",
+      } as Record<string, string>,
+      satellite: "СУПУТНИК",
+      map: "КАРТА",
+      markBoundary: "📐 Позначте межу поля",
+      points: "Точки",
+      critical: "Критичний",
+      high: "Високий",
+      medium: "Середній",
+      low: "Низький",
+      back: "↶ Назад",
+      clear: "🗑 Очистити",
+      completeBoundary: "✓ Завершити межу",
+      boundaryMinimum: "Позначте щонайменше 3 точки, щоб завершити межу.",
+      openField: "Відкрити поле",
+      noPriority: "Без пріоритету",
+    },
+    bg: {
+      countries: {
+        CZE: "Чехия",
+        SVK: "Словакия",
+        DEU: "Германия",
+        AUT: "Австрия",
+        POL: "Полша",
+        FRA: "Франция",
+        ITA: "Италия",
+        ESP: "Испания",
+      } as Record<string, string>,
+      satellite: "САТЕЛИТ",
+      map: "КАРТА",
+      markBoundary: "📐 Маркирайте границата на полето",
+      points: "Точки",
+      critical: "Критичен",
+      high: "Висок",
+      medium: "Среден",
+      low: "Нисък",
+      back: "↶ Назад",
+      clear: "🗑 Изчисти",
+      completeBoundary: "✓ Завърши границата",
+      boundaryMinimum: "Маркирайте поне 3 точки, за да завършите границата.",
+      openField: "Отвори поле",
+      noPriority: "Без приоритет",
+    },
+    hr: {
+      countries: {
+        CZE: "Češka",
+        SVK: "Slovačka",
+        DEU: "Njemačka",
+        AUT: "Austrija",
+        POL: "Poljska",
+        FRA: "Francuska",
+        ITA: "Italija",
+        ESP: "Španjolska",
+      } as Record<string, string>,
+      satellite: "SATELIT",
+      map: "KARTA",
+      markBoundary: "📐 Označite granicu parcele",
+      points: "Točke",
+      critical: "Kritična",
+      high: "Visoka",
+      medium: "Srednja",
+      low: "Niska",
+      back: "↶ Natrag",
+      clear: "🗑 Očisti",
+      completeBoundary: "✓ Dovrši granicu",
+      boundaryMinimum: "Označite najmanje 3 točke kako biste dovršili granicu.",
+      openField: "Otvori parcelu",
+      noPriority: "Bez prioriteta",
+    },
+    sl: {
+      countries: {
+        CZE: "Češka",
+        SVK: "Slovaška",
+        DEU: "Nemčija",
+        AUT: "Avstrija",
+        POL: "Poljska",
+        FRA: "Francija",
+        ITA: "Italija",
+        ESP: "Španija",
+      } as Record<string, string>,
+      satellite: "SATELIT",
+      map: "ZEMLJEVID",
+      markBoundary: "📐 Označite mejo parcele",
+      points: "Točke",
+      critical: "Kritična",
+      high: "Visoka",
+      medium: "Srednja",
+      low: "Nizka",
+      back: "↶ Nazaj",
+      clear: "🗑 Počisti",
+      completeBoundary: "✓ Dokončaj mejo",
+      boundaryMinimum: "Za dokončanje meje označite vsaj 3 točke.",
+      openField: "Odpri parcelo",
+      noPriority: "Brez prioritete",
+    },
+    lt: {
+      countries: {
+        CZE: "Čekija",
+        SVK: "Slovakija",
+        DEU: "Vokietija",
+        AUT: "Austrija",
+        POL: "Lenkija",
+        FRA: "Prancūzija",
+        ITA: "Italija",
+        ESP: "Ispanija",
+      } as Record<string, string>,
+      satellite: "PALYDOVAS",
+      map: "ŽEMĖLAPIS",
+      markBoundary: "📐 Pažymėkite lauko ribą",
+      points: "Taškai",
+      critical: "Kritinis",
+      high: "Aukštas",
+      medium: "Vidutinis",
+      low: "Žemas",
+      back: "↶ Atgal",
+      clear: "🗑 Išvalyti",
+      completeBoundary: "✓ Užbaigti ribą",
+      boundaryMinimum: "Norėdami užbaigti ribą, pažymėkite bent 3 taškus.",
+      openField: "Atidaryti lauką",
+      noPriority: "Be prioriteto",
+    },
+    lv: {
+      countries: {
+        CZE: "Čehija",
+        SVK: "Slovākija",
+        DEU: "Vācija",
+        AUT: "Austrija",
+        POL: "Polija",
+        FRA: "Francija",
+        ITA: "Itālija",
+        ESP: "Spānija",
+      } as Record<string, string>,
+      satellite: "SATELĪTS",
+      map: "KARTE",
+      markBoundary: "📐 Atzīmējiet lauka robežu",
+      points: "Punkti",
+      critical: "Kritiska",
+      high: "Augsta",
+      medium: "Vidēja",
+      low: "Zema",
+      back: "↶ Atpakaļ",
+      clear: "🗑 Notīrīt",
+      completeBoundary: "✓ Pabeigt robežu",
+      boundaryMinimum: "Lai pabeigtu robežu, atzīmējiet vismaz 3 punktus.",
+      openField: "Atvērt lauku",
+      noPriority: "Bez prioritātes",
+    },
+    et: {
+      countries: {
+        CZE: "Tšehhi",
+        SVK: "Slovakkia",
+        DEU: "Saksamaa",
+        AUT: "Austria",
+        POL: "Poola",
+        FRA: "Prantsusmaa",
+        ITA: "Itaalia",
+        ESP: "Hispaania",
+      } as Record<string, string>,
+      satellite: "SATELLIIT",
+      map: "KAART",
+      markBoundary: "📐 Märkige põllupiir",
+      points: "Punktid",
+      critical: "Kriitiline",
+      high: "Kõrge",
+      medium: "Keskmine",
+      low: "Madal",
+      back: "↶ Tagasi",
+      clear: "🗑 Tühjenda",
+      completeBoundary: "✓ Lõpeta piir",
+      boundaryMinimum: "Piiri lõpetamiseks märkige vähemalt 3 punkti.",
+      openField: "Ava põld",
+      noPriority: "Prioriteet puudub",
+    },
+    el: {
+      countries: {
+        CZE: "Τσεχία",
+        SVK: "Σλοβακία",
+        DEU: "Γερμανία",
+        AUT: "Αυστρία",
+        POL: "Πολωνία",
+        FRA: "Γαλλία",
+        ITA: "Ιταλία",
+        ESP: "Ισπανία",
+      } as Record<string, string>,
+      satellite: "ΔΟΡΥΦΟΡΟΣ",
+      map: "ΧΑΡΤΗΣ",
+      markBoundary: "📐 Σημειώστε το όριο του αγροτεμαχίου",
+      points: "Σημεία",
+      critical: "Κρίσιμη",
+      high: "Υψηλή",
+      medium: "Μέτρια",
+      low: "Χαμηλή",
+      back: "↶ Πίσω",
+      clear: "🗑 Εκκαθάριση",
+      completeBoundary: "✓ Ολοκλήρωση ορίου",
+      boundaryMinimum: "Σημειώστε τουλάχιστον 3 σημεία για να ολοκληρώσετε το όριο.",
+      openField: "Άνοιγμα αγροτεμαχίου",
+      noPriority: "Χωρίς προτεραιότητα",
+    },
+    sv: {
+      countries: {
+        CZE: "Tjeckien",
+        SVK: "Slovakien",
+        DEU: "Tyskland",
+        AUT: "Österrike",
+        POL: "Polen",
+        FRA: "Frankrike",
+        ITA: "Italien",
+        ESP: "Spanien",
+      } as Record<string, string>,
+      satellite: "SATELLIT",
+      map: "KARTA",
+      markBoundary: "📐 Markera fältgränsen",
+      points: "Punkter",
+      critical: "Kritisk",
+      high: "Hög",
+      medium: "Medel",
+      low: "Låg",
+      back: "↶ Tillbaka",
+      clear: "🗑 Rensa",
+      completeBoundary: "✓ Slutför gräns",
+      boundaryMinimum: "Markera minst 3 punkter för att slutföra gränsen.",
+      openField: "Öppna fält",
+      noPriority: "Ingen prioritet",
+    },
+    da: {
+      countries: {
+        CZE: "Tjekkiet",
+        SVK: "Slovakiet",
+        DEU: "Tyskland",
+        AUT: "Østrig",
+        POL: "Polen",
+        FRA: "Frankrig",
+        ITA: "Italien",
+        ESP: "Spanien",
+      } as Record<string, string>,
+      satellite: "SATELLIT",
+      map: "KORT",
+      markBoundary: "📐 Markér markgrænsen",
+      points: "Punkter",
+      critical: "Kritisk",
+      high: "Høj",
+      medium: "Mellem",
+      low: "Lav",
+      back: "↶ Tilbage",
+      clear: "🗑 Ryd",
+      completeBoundary: "✓ Færdiggør grænse",
+      boundaryMinimum: "Markér mindst 3 punkter for at færdiggøre grænsen.",
+      openField: "Åbn mark",
+      noPriority: "Ingen prioritet",
+    },
+    no: {
+      countries: {
+        CZE: "Tsjekkia",
+        SVK: "Slovakia",
+        DEU: "Tyskland",
+        AUT: "Østerrike",
+        POL: "Polen",
+        FRA: "Frankrike",
+        ITA: "Italia",
+        ESP: "Spania",
+      } as Record<string, string>,
+      satellite: "SATELLITT",
+      map: "KART",
+      markBoundary: "📐 Marker feltgrensen",
+      points: "Punkter",
+      critical: "Kritisk",
+      high: "Høy",
+      medium: "Middels",
+      low: "Lav",
+      back: "↶ Tilbake",
+      clear: "🗑 Tøm",
+      completeBoundary: "✓ Fullfør grense",
+      boundaryMinimum: "Marker minst 3 punkter for å fullføre grensen.",
+      openField: "Åpne felt",
+      noPriority: "Ingen prioritet",
+    },
+    fi: {
+      countries: {
+        CZE: "Tšekki",
+        SVK: "Slovakia",
+        DEU: "Saksa",
+        AUT: "Itävalta",
+        POL: "Puola",
+        FRA: "Ranska",
+        ITA: "Italia",
+        ESP: "Espanja",
+      } as Record<string, string>,
+      satellite: "SATELLIITTI",
+      map: "KARTTA",
+      markBoundary: "📐 Merkitse pellon raja",
+      points: "Pisteet",
+      critical: "Kriittinen",
+      high: "Korkea",
+      medium: "Keskitaso",
+      low: "Matala",
+      back: "↶ Takaisin",
+      clear: "🗑 Tyhjennä",
+      completeBoundary: "✓ Viimeistele raja",
+      boundaryMinimum: "Merkitse vähintään 3 pistettä rajan viimeistelemiseksi.",
+      openField: "Avaa pelto",
+      noPriority: "Ei prioriteettia",
+    }
+  };
+
+  return copies[language as keyof typeof copies] ?? copies.en;
+}
+
+function getLocalizedPriority(
+  priority: string | null | undefined,
+  copy: ReturnType<typeof getWorldMapCopy>
+) {
+  if (priority === "Kritická") return copy.critical;
+  if (priority === "Vysoká") return copy.high;
+  if (priority === "Střední") return copy.medium;
+  if (priority === "Nízká") return copy.low;
+  return priority ?? copy.noPriority;
+}
+
 
 const satelliteLayer = {
   id: "aegris-satellite",
@@ -162,14 +806,13 @@ export default function WorldMap({
   selectedProjectId,
 }: WorldMapProps) {
   const mapRef = useRef<MapRef | null>(null);
+  const { language } = useLanguage();
+  const copy = getWorldMapCopy(language);
 
   const [satellite, setSatellite] = useState(true);
-  const [selectedCountry, setSelectedCountry] = useState("Česko");
+  const [selectedCountryIso3, setSelectedCountryIso3] = useState("CZE");
   const [boundary, setBoundary] = useState<BoundaryPoint[]>([]);
   const [hoveredProject, setHoveredProject] = useState<Project | null>(null);
-
-  const selectedCountryIso3 =
-    countries.find((country) => country.name === selectedCountry)?.iso3 ?? "CZE";
 
   useEffect(() => {
     if (
@@ -193,11 +836,11 @@ export default function WorldMap({
     });
   }, [drawingMode, focusLatitude, focusLongitude]);
 
-  function selectCountry(countryName: string) {
-    const country = countries.find((item) => item.name === countryName);
+  function selectCountry(countryIso3: string) {
+    const country = countries.find((item) => item.iso3 === countryIso3);
     if (!country) return;
 
-    setSelectedCountry(country.name);
+    setSelectedCountryIso3(country.iso3);
 
     const map = mapRef.current;
     if (!map) return;
@@ -231,7 +874,7 @@ export default function WorldMap({
 
   function completeBoundary() {
     if (boundary.length < 3) {
-      alert("Pro dokončení hranice označ alespoň 3 body.");
+      alert(copy.boundaryMinimum);
       return;
     }
 
@@ -274,13 +917,13 @@ export default function WorldMap({
           <>
             {!compactControls && (
               <select
-                value={selectedCountry}
+                value={selectedCountryIso3}
                 onChange={(event) => selectCountry(event.target.value)}
                 className="rounded-xl border border-white/10 bg-[#071017]/90 px-4 py-3 text-sm font-bold text-white shadow-2xl outline-none backdrop-blur"
               >
                 {countries.map((country) => (
-                  <option key={country.iso3} value={country.name}>
-                    {country.name}
+                  <option key={country.iso3} value={country.iso3}>
+                    {copy.countries[country.iso3] ?? country.name}
                   </option>
                 ))}
               </select>
@@ -295,16 +938,16 @@ export default function WorldMap({
                   : "rounded-xl px-4 py-3 text-sm"
               }`}
             >
-              {satellite ? "SATELIT" : "MAPA"}
+              {satellite ? copy.satellite : copy.map}
             </button>
           </>
         )}
 
         {drawingMode && (
           <div className="rounded-xl border border-cyan-400 bg-slate-950/95 px-4 py-3 text-sm font-semibold text-white shadow-2xl backdrop-blur">
-            📐 Označte hranici pozemku
+            {copy.markBoundary}
             <div className="mt-1 text-xs text-slate-400">
-              Body: {boundary.length}
+              {copy.points}: {boundary.length}
             </div>
           </div>
         )}
@@ -314,15 +957,19 @@ export default function WorldMap({
         <div className="absolute bottom-4 left-4 z-40 flex items-center gap-3 rounded-lg border border-white/10 bg-[#071017]/85 px-3 py-2 text-[10px] font-semibold text-slate-400 backdrop-blur">
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-red-400" />
-            Kritická
+            {copy.critical}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-orange-400" />
-            Vysoká
+            {copy.high}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-300" />
+            {copy.medium}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Nízká
+            {copy.low}
           </span>
         </div>
       )}
@@ -335,7 +982,7 @@ export default function WorldMap({
             disabled={boundary.length === 0}
             className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            ↶ Zpět
+            {copy.back}
           </button>
 
           <button
@@ -344,7 +991,7 @@ export default function WorldMap({
             disabled={boundary.length === 0}
             className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            🗑 Smazat
+            {copy.clear}
           </button>
 
           <button
@@ -353,7 +1000,7 @@ export default function WorldMap({
             disabled={boundary.length < 3}
             className="rounded-xl bg-cyan-500 px-5 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            ✓ Dokončit hranici
+            {copy.completeBoundary}
           </button>
         </div>
       )}
@@ -468,7 +1115,7 @@ export default function WorldMap({
                     project.priority
                   )} ${selected ? "scale-125 ring-8" : ""}`}
                   title={project.name}
-                  aria-label={`Otevřít pozemek ${project.name}`}
+                  aria-label={`${copy.openField} ${project.name}`}
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-[#061015]" />
                   {project.unreadAlerts ? (
@@ -492,7 +1139,7 @@ export default function WorldMap({
             <div className="min-w-[150px] bg-[#071017] p-2 text-slate-100">
               <div className="text-xs font-black">{hoveredProject.name}</div>
               <div className="mt-1 flex items-center justify-between gap-4 text-[10px] text-slate-400">
-                <span>{hoveredProject.priority ?? "Bez priority"}</span>
+                <span>{getLocalizedPriority(hoveredProject.priority, copy)}</span>
                 <span>
                   {hoveredProject.score != null
                     ? `${hoveredProject.score}/100`

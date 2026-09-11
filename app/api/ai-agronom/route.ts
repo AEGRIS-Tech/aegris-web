@@ -6,10 +6,52 @@ import { requireAccountAccess } from "@/lib/auth/account-access";
 
 export const dynamic = "force-dynamic";
 
+const SUPPORTED_LANGUAGES = [
+  "cs", "en", "sk", "de", "pl", "fr", "es", "it", "nl", "pt", "ro", "hu",
+  "uk", "bg", "hr", "sl", "lt", "lv", "et", "el", "sv", "da", "no", "fi",
+] as const;
+
+type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+
+const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
+  cs: "Czech",
+  en: "English",
+  sk: "Slovak",
+  de: "German",
+  pl: "Polish",
+  fr: "French",
+  es: "Spanish",
+  it: "Italian",
+  nl: "Dutch",
+  pt: "Portuguese",
+  ro: "Romanian",
+  hu: "Hungarian",
+  uk: "Ukrainian",
+  bg: "Bulgarian",
+  hr: "Croatian",
+  sl: "Slovenian",
+  lt: "Lithuanian",
+  lv: "Latvian",
+  et: "Estonian",
+  el: "Greek",
+  sv: "Swedish",
+  da: "Danish",
+  no: "Norwegian",
+  fi: "Finnish",
+};
+
 type RequestBody = {
   projectId?: number;
   message?: string;
+  language?: string;
 };
+
+function normalizeLanguage(value: unknown): SupportedLanguage {
+  return typeof value === "string" &&
+    SUPPORTED_LANGUAGES.includes(value as SupportedLanguage)
+    ? (value as SupportedLanguage)
+    : "en";
+}
 
 function numericOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === "") {
@@ -89,6 +131,8 @@ export async function POST(request: Request) {
     const projectId = Number(body.projectId);
     const message =
       typeof body.message === "string" ? body.message.trim() : "";
+    const language = normalizeLanguage(body.language);
+    const responseLanguageName = LANGUAGE_NAMES[language];
 
     if (!Number.isInteger(projectId) || projectId <= 0) {
       return NextResponse.json(
@@ -752,7 +796,10 @@ DŮLEŽITÁ PRAVIDLA:
     ale musíš jasně oddělit obecnou informaci od konkrétního
     hodnocení tohoto pozemku.
 
-14. Odpovídej česky, pokud uživatel výslovně nepoužije jiný jazyk.
+14. Odpovídej VÝHRADNĚ v jazyce rozhraní předaném níže jako RESPONSE LANGUAGE.
+    Jazyk dotazu uživatele toto pravidlo nepřebíjí.
+    Zachovej odborné zkratky, jednotky, názvy zdrojů a kanonické hodnoty tam,
+    kde jejich překlad není vhodný.
 
 15. Odpověď má být praktická, stručná a srozumitelná agronomovi.
     Nepoužívej marketingové fráze.
@@ -786,6 +833,9 @@ DŮLEŽITÁ PRAVIDLA:
             {
               type: "input_text",
               text: `
+RESPONSE LANGUAGE:
+${responseLanguageName} (${language})
+
 DOTAZ UŽIVATELE:
 ${message}
 
@@ -829,6 +879,7 @@ ${JSON.stringify(aegrisContext, null, 2)}
         analysisId: analysis?.id ?? null,
         model: "gpt-5.6-luna",
         generatedAt: new Date().toISOString(),
+        language,
 
         decisionSource: decisionSnapshot
           ? "analysis.decision_snapshot"

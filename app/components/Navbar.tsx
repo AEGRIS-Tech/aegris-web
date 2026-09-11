@@ -25,7 +25,10 @@ export default function Navbar() {
     },
   };
 
-  const t = text[language];
+  const t =
+  language === "cs"
+    ? text.cs
+    : text.en;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md">

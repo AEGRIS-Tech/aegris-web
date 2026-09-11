@@ -3,13 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+import {
+  languageLabels,
+  supportedLanguages,
+  type Language,
+  useLanguage,
+} from "../context/LanguageContext";
 
 import { supabase } from "@/lib/supabase";
 
 const STORAGE_KEY = "aegris.preferences.v1";
 
 type Preferences = {
-  language: "Čeština" | "English";
   units: "Metrické" | "Imperiální";
   criticalAlerts: boolean;
   analysisAlerts: boolean;
@@ -126,7 +131,6 @@ type MemberMutationApiResponse =
     };
 
 const DEFAULT_PREFERENCES: Preferences = {
-  language: "Čeština",
   units: "Metrické",
   criticalAlerts: true,
   analysisAlerts: true,
@@ -135,15 +139,9 @@ const DEFAULT_PREFERENCES: Preferences = {
 function normalizePreferences(
   value: Record<string, unknown>
 ): Preferences {
-  const rawLanguage = value.language;
   const rawUnits = value.units;
 
   return {
-    language:
-      rawLanguage === "English"
-        ? "English"
-        : "Čeština",
-
     units:
       rawUnits === "Imperiální" ||
       rawUnits === "ImperiĂˇlnĂ"
@@ -240,6 +238,11 @@ function getMemberCountLabel(
 
 export default function SettingsPage() {
   const router = useRouter();
+
+  const {
+    language,
+    setLanguage,
+  } = useLanguage();
 
   const [
     user,
@@ -421,10 +424,13 @@ export default function SettingsPage() {
               unknown
             >;
 
-          setPreferences(
+          const normalizedPreferences =
             normalizePreferences(
               parsed
-            )
+            );
+
+          setPreferences(
+            normalizedPreferences
           );
         }
       } catch (error) {
@@ -1613,17 +1619,23 @@ export default function SettingsPage() {
                   <label className="block">
                     <span className="text-[9px] font-bold text-slate-500">Jazyk</span>
                     <select
-                      value={preferences.language}
-                      onChange={(event) =>
-                        updatePreference(
-                          "language",
-                          event.target.value as Preferences["language"]
-                        )
-                      }
+                      value={language}
+                      onChange={(event) => {
+                        setSaved(false);
+                        setLanguage(
+                          event.target.value as Language
+                        );
+                      }}
                       className="mt-2 w-full rounded-xl border border-white/[0.08] bg-[#071017] px-4 py-3 text-[10px] font-bold text-slate-300 outline-none focus:border-cyan-300/40"
                     >
-                      <option value="Čeština">Čeština</option>
-                      <option value="English">English</option>
+                      {supportedLanguages.map((lang) => (
+                        <option
+                          key={lang}
+                          value={lang}
+                        >
+                          {languageLabels[lang]}
+                        </option>
+                      ))}
                     </select>
                   </label>
 

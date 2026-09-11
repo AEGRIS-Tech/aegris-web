@@ -16,11 +16,116 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type { Geometry } from "geojson";
 
+import { useLanguage } from "../../context/LanguageContext";
+
 type Props = {
   latitude: number;
   longitude: number;
   boundary?: Geometry | null;
 };
+
+function getProjectMapCopy(language: string) {
+  const copies = {
+    cs: {
+      mapAriaLabel: "Satelitní mapa projektového pozemku",
+      fieldMarkerLabel: "Poloha projektového pozemku",
+    },
+    en: {
+      mapAriaLabel: "Satellite map of the project field",
+      fieldMarkerLabel: "Project field location",
+    },
+    sk: {
+      mapAriaLabel: "Satelitná mapa projektového pozemku",
+      fieldMarkerLabel: "Poloha projektového pozemku",
+    },
+    de: {
+      mapAriaLabel: "Satellitenkarte der Projektfläche",
+      fieldMarkerLabel: "Position der Projektfläche",
+    },
+    pl: {
+      mapAriaLabel: "Mapa satelitarna pola projektu",
+      fieldMarkerLabel: "Lokalizacja pola projektu",
+    },
+    fr: {
+      mapAriaLabel: "Carte satellite de la parcelle du projet",
+      fieldMarkerLabel: "Emplacement de la parcelle du projet",
+    },
+    es: {
+      mapAriaLabel: "Mapa satelital de la parcela del proyecto",
+      fieldMarkerLabel: "Ubicación de la parcela del proyecto",
+    },
+    it: {
+      mapAriaLabel: "Mappa satellitare dell'appezzamento del progetto",
+      fieldMarkerLabel: "Posizione dell'appezzamento del progetto",
+    },
+    nl: {
+      mapAriaLabel: "Satellietkaart van het projectperceel",
+      fieldMarkerLabel: "Locatie van het projectperceel",
+    },
+    pt: {
+      mapAriaLabel: "Mapa de satélite da parcela do projeto",
+      fieldMarkerLabel: "Localização da parcela do projeto",
+    },
+    ro: {
+      mapAriaLabel: "Hartă satelitară a parcelei proiectului",
+      fieldMarkerLabel: "Locația parcelei proiectului",
+    },
+    hu: {
+      mapAriaLabel: "A projekt tábla műholdas térképe",
+      fieldMarkerLabel: "A projekt tábla helye",
+    },
+    uk: {
+      mapAriaLabel: "Супутникова карта поля проєкту",
+      fieldMarkerLabel: "Розташування поля проєкту",
+    },
+    bg: {
+      mapAriaLabel: "Сателитна карта на проектното поле",
+      fieldMarkerLabel: "Местоположение на проектното поле",
+    },
+    hr: {
+      mapAriaLabel: "Satelitska karta projektne parcele",
+      fieldMarkerLabel: "Lokacija projektne parcele",
+    },
+    sl: {
+      mapAriaLabel: "Satelitski zemljevid projektne parcele",
+      fieldMarkerLabel: "Lokacija projektne parcele",
+    },
+    lt: {
+      mapAriaLabel: "Projekto lauko palydovinis žemėlapis",
+      fieldMarkerLabel: "Projekto lauko vieta",
+    },
+    lv: {
+      mapAriaLabel: "Projekta lauka satelītkarte",
+      fieldMarkerLabel: "Projekta lauka atrašanās vieta",
+    },
+    et: {
+      mapAriaLabel: "Projekti põllu satelliitkaart",
+      fieldMarkerLabel: "Projekti põllu asukoht",
+    },
+    el: {
+      mapAriaLabel: "Δορυφορικός χάρτης του αγροτεμαχίου του έργου",
+      fieldMarkerLabel: "Τοποθεσία του αγροτεμαχίου του έργου",
+    },
+    sv: {
+      mapAriaLabel: "Satellitkarta över projektfältet",
+      fieldMarkerLabel: "Projektfältets plats",
+    },
+    da: {
+      mapAriaLabel: "Satellitkort over projektmarken",
+      fieldMarkerLabel: "Projektmarkens placering",
+    },
+    no: {
+      mapAriaLabel: "Satellittkart over prosjektjordet",
+      fieldMarkerLabel: "Plassering av prosjektjordet",
+    },
+    fi: {
+      mapAriaLabel: "Projektin lohkon satelliittikartta",
+      fieldMarkerLabel: "Projektin lohkon sijainti",
+    }
+  };
+
+  return copies[language as keyof typeof copies] ?? copies.en;
+}
 
 export default function ProjectMap({
   latitude,
@@ -28,6 +133,8 @@ export default function ProjectMap({
   boundary,
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
+  const { language } = useLanguage();
+  const copy = getProjectMapCopy(language);
 
   useEffect(() => {
     maplibregl.setWorkerUrl(
@@ -70,7 +177,11 @@ export default function ProjectMap({
     : null;
 
   return (
-    <div className="relative h-[420px] w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950">
+    <div
+      className="relative h-[420px] w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950"
+      role="region"
+      aria-label={copy.mapAriaLabel}
+    >
       <Map
         ref={mapRef}
         initialViewState={{
@@ -103,7 +214,6 @@ export default function ProjectMap({
             type="geojson"
             data={boundaryGeoJson}
           >
-            {/* Výplň pole */}
             <Layer
               id="project-boundary-fill"
               type="fill"
@@ -113,7 +223,6 @@ export default function ProjectMap({
               }}
             />
 
-            {/* Hranice pole */}
             <Layer
               id="project-boundary-line"
               type="line"
@@ -131,7 +240,12 @@ export default function ProjectMap({
           latitude={latitude}
           anchor="center"
         >
-          <div className="relative flex h-10 w-10 items-center justify-center">
+          <div
+            className="relative flex h-10 w-10 items-center justify-center"
+            role="img"
+            aria-label={copy.fieldMarkerLabel}
+            title={copy.fieldMarkerLabel}
+          >
             <div className="absolute h-10 w-10 animate-ping rounded-full bg-cyan-400/30" />
 
             <div className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-cyan-500 shadow-xl shadow-cyan-500/50">

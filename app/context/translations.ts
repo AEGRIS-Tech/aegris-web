@@ -9,18 +9,15 @@
       demo: "Request Demo",
       learnMore: "Learn More",
     },
-
     hero: {
       title: "Operational Intelligence for the Physical World",
       subtitle:
         "Real-time satellite intelligence, AI analysis and infrastructure monitoring from one unified platform.",
     },
-
     aiDemo: {
       eyebrow: "AI DEMO",
       title: "Infrastructure Damage Detection",
-      subtitle:
-        "Upload a satellite image and let AEGRIS AI analyze it.",
+      subtitle: "Upload a satellite image and let AEGRIS AI analyze it.",
       uploadTitle: "Upload Satellite Image",
       fileTypes: "JPG, PNG or TIFF",
       analyzeButton: "Analyze Image",
@@ -35,7 +32,6 @@
       repairWithin30Days: "Repair within 30 days",
       downloadReport: "Download PDF Report",
     },
-
     features: {
       title: "What AEGRIS Offers",
       subtitle:
@@ -61,28 +57,17 @@
         },
       ],
     },
-
     platform: {
       title: "One platform.",
       highlight: " Endless possibilities.",
       subtitle:
         "AEGRIS connects data, artificial intelligence and automation into one system ready for the companies of the future.",
       items: [
-        {
-          title: "Centralized Data",
-          text: "All company data in one secure place.",
-        },
-        {
-          title: "AI Analysis",
-          text: "Automated analysis and recommendations in real time.",
-        },
-        {
-          title: "Security",
-          text: "Modern encryption and access rights management.",
-        },
+        { title: "Centralized Data", text: "All company data in one secure place." },
+        { title: "AI Analysis", text: "Automated analysis and recommendations in real time." },
+        { title: "Security", text: "Modern encryption and access rights management." },
       ],
     },
-
     stats: {
       clients: "Clients",
       analyzedData: "Analyzed Data",
@@ -101,13 +86,11 @@
       demo: "Požádat o demo",
       learnMore: "Zjistit více",
     },
-
     hero: {
       title: "Operační inteligence pro fyzický svět",
       subtitle:
         "Monitorujte infrastrukturu pomocí AI, satelitních dat a analýz v reálném čase z jediné platformy.",
     },
-
     aiDemo: {
       eyebrow: "AI DEMO",
       title: "Detekce poškození infrastruktury",
@@ -127,7 +110,6 @@
       repairWithin30Days: "Opravit do 30 dnů",
       downloadReport: "Stáhnout PDF report",
     },
-
     features: {
       title: "Co AEGRIS nabízí",
       subtitle:
@@ -153,28 +135,17 @@
         },
       ],
     },
-
     platform: {
       title: "Jedna platforma.",
       highlight: " Nekonečné možnosti.",
       subtitle:
         "AEGRIS propojuje data, umělou inteligenci a automatizaci do jednoho systému připraveného pro firmy budoucnosti.",
       items: [
-        {
-          title: "Centrální data",
-          text: "Všechna firemní data na jednom bezpečném místě.",
-        },
-        {
-          title: "AI Analýza",
-          text: "Automatická analýza a doporučení v reálném čase.",
-        },
-        {
-          title: "Bezpečnost",
-          text: "Moderní šifrování a řízení přístupových práv.",
-        },
+        { title: "Centrální data", text: "Všechna firemní data na jednom bezpečném místě." },
+        { title: "AI Analýza", text: "Automatická analýza a doporučení v reálném čase." },
+        { title: "Bezpečnost", text: "Moderní šifrování a řízení přístupových práv." },
       ],
     },
-
     stats: {
       clients: "Klientů",
       analyzedData: "Analyzovaných dat",
@@ -183,3 +154,9 @@
     },
   },
 } as const;
+
+export type LegacyTranslation = (typeof translations)[keyof typeof translations];
+
+export function getLegacyTranslation(language: string): LegacyTranslation {
+  return language === "cs" ? translations.cs : translations.en;
+}
