@@ -1000,10 +1000,50 @@ function getHomeCopy(language: string) {
 
   return translations[language] ?? en;
 }
+
+function getContactCopy(language: string) {
+  const translations: Record<string, { eyebrow: string; title: string; description: string; emailAction: string }> = {
+    en: { eyebrow: "Contact", title: "Let's discuss AEGRIS.", description: "For pilot deployments, commercial cooperation, technical questions or a direct presentation of AEGRIS, contact us at the official project address.", emailAction: "Write an email" },
+    cs: { eyebrow: "Kontakt", title: "Pojďme probrat AEGRIS.", description: "Pro pilotní provoz, obchodní spolupráci, technické dotazy nebo přímé představení AEGRIS nás kontaktujte na oficiální adrese projektu.", emailAction: "Napsat e-mail" },
+    sk: { eyebrow: "Kontakt", title: "Poďme prebrať AEGRIS.", description: "Pre pilotnú prevádzku, obchodnú spoluprácu, technické otázky alebo priame predstavenie AEGRIS nás kontaktujte na oficiálnej adrese projektu.", emailAction: "Napísať e-mail" },
+    de: { eyebrow: "Kontakt", title: "Lassen Sie uns über AEGRIS sprechen.", description: "Für Pilotprojekte, geschäftliche Zusammenarbeit, technische Fragen oder eine direkte Präsentation von AEGRIS kontaktieren Sie uns über die offizielle Projektadresse.", emailAction: "E-Mail schreiben" },
+    pl: { eyebrow: "Kontakt", title: "Porozmawiajmy o AEGRIS.", description: "W sprawie pilotażu, współpracy biznesowej, pytań technicznych lub bezpośredniej prezentacji AEGRIS prosimy o kontakt na oficjalny adres projektu.", emailAction: "Napisz e-mail" },
+    fr: { eyebrow: "Contact", title: "Parlons d’AEGRIS.", description: "Pour un pilote, une coopération commerciale, des questions techniques ou une présentation directe d’AEGRIS, contactez-nous à l’adresse officielle du projet.", emailAction: "Écrire un e-mail" },
+    es: { eyebrow: "Contacto", title: "Hablemos de AEGRIS.", description: "Para proyectos piloto, cooperación comercial, consultas técnicas o una presentación directa de AEGRIS, contáctenos en la dirección oficial del proyecto.", emailAction: "Escribir un correo" },
+    it: { eyebrow: "Contatto", title: "Parliamo di AEGRIS.", description: "Per progetti pilota, collaborazioni commerciali, domande tecniche o una presentazione diretta di AEGRIS, contattaci all’indirizzo ufficiale del progetto.", emailAction: "Scrivi un'e-mail" },
+    nl: { eyebrow: "Contact", title: "Laten we AEGRIS bespreken.", description: "Voor pilots, commerciële samenwerking, technische vragen of een directe presentatie van AEGRIS kunt u contact opnemen via het officiële projectadres.", emailAction: "E-mail sturen" },
+    pt: { eyebrow: "Contacto", title: "Vamos falar sobre o AEGRIS.", description: "Para projetos-piloto, cooperação comercial, questões técnicas ou uma apresentação direta do AEGRIS, contacte-nos através do endereço oficial do projeto.", emailAction: "Enviar e-mail" },
+    ro: { eyebrow: "Contact", title: "Să discutăm despre AEGRIS.", description: "Pentru proiecte pilot, colaborare comercială, întrebări tehnice sau o prezentare directă AEGRIS, contactați-ne la adresa oficială a proiectului.", emailAction: "Trimite e-mail" },
+    hu: { eyebrow: "Kapcsolat", title: "Beszéljünk az AEGRIS-ről.", description: "Pilotprojektekhez, üzleti együttműködéshez, technikai kérdésekhez vagy az AEGRIS közvetlen bemutatásához keressen minket a projekt hivatalos címén.", emailAction: "E-mail írása" },
+    uk: { eyebrow: "Контакт", title: "Обговорімо AEGRIS.", description: "Щодо пілотних проєктів, комерційної співпраці, технічних питань або прямої презентації AEGRIS зв’яжіться з нами за офіційною адресою проєкту.", emailAction: "Написати лист" },
+    bg: { eyebrow: "Контакт", title: "Нека обсъдим AEGRIS.", description: "За пилотни проекти, бизнес сътрудничество, технически въпроси или директно представяне на AEGRIS се свържете с нас на официалния адрес на проекта.", emailAction: "Изпрати имейл" },
+    hr: { eyebrow: "Kontakt", title: "Razgovarajmo o AEGRIS-u.", description: "Za pilot-projekte, poslovnu suradnju, tehnička pitanja ili izravnu prezentaciju AEGRIS-a kontaktirajte nas na službenu adresu projekta.", emailAction: "Pošalji e-poštu" },
+    sl: { eyebrow: "Kontakt", title: "Pogovorimo se o AEGRIS-u.", description: "Za pilotne projekte, poslovno sodelovanje, tehnična vprašanja ali neposredno predstavitev AEGRIS-a nas kontaktirajte na uradni naslov projekta.", emailAction: "Pošlji e-pošto" },
+    lt: { eyebrow: "Kontaktai", title: "Aptarkime AEGRIS.", description: "Dėl bandomųjų projektų, komercinio bendradarbiavimo, techninių klausimų ar tiesioginio AEGRIS pristatymo susisiekite oficialiu projekto adresu.", emailAction: "Rašyti el. laišką" },
+    lv: { eyebrow: "Kontakti", title: "Apspriedīsim AEGRIS.", description: "Par pilotprojektiem, komerciālu sadarbību, tehniskiem jautājumiem vai tiešu AEGRIS prezentāciju sazinieties ar mums projekta oficiālajā adresē.", emailAction: "Rakstīt e-pastu" },
+    et: { eyebrow: "Kontakt", title: "Räägime AEGRIS-est.", description: "Pilootprojektide, ärikoostöö, tehniliste küsimuste või AEGRIS-e otsese esitluse korral võtke meiega ühendust projekti ametlikul aadressil.", emailAction: "Saada e-kiri" },
+    el: { eyebrow: "Επικοινωνία", title: "Ας μιλήσουμε για το AEGRIS.", description: "Για πιλοτικά έργα, εμπορική συνεργασία, τεχνικές ερωτήσεις ή άμεση παρουσίαση του AEGRIS, επικοινωνήστε μαζί μας στην επίσημη διεύθυνση του έργου.", emailAction: "Αποστολή e-mail" },
+    sv: { eyebrow: "Kontakt", title: "Låt oss prata om AEGRIS.", description: "För pilotprojekt, kommersiellt samarbete, tekniska frågor eller en direkt presentation av AEGRIS, kontakta oss via projektets officiella adress.", emailAction: "Skicka e-post" },
+    da: { eyebrow: "Kontakt", title: "Lad os tale om AEGRIS.", description: "Ved pilotprojekter, kommercielt samarbejde, tekniske spørgsmål eller en direkte præsentation af AEGRIS kan du kontakte os på projektets officielle adresse.", emailAction: "Send e-mail" },
+    no: { eyebrow: "Kontakt", title: "La oss snakke om AEGRIS.", description: "For pilotprosjekter, kommersielt samarbeid, tekniske spørsmål eller en direkte presentasjon av AEGRIS, kontakt oss på prosjektets offisielle adresse.", emailAction: "Send e-post" },
+    fi: { eyebrow: "Yhteystiedot", title: "Keskustellaan AEGRISista.", description: "Pilottihankkeissa, kaupallisessa yhteistyössä, teknisissä kysymyksissä tai AEGRISin suorassa esittelyssä ota yhteyttä projektin viralliseen osoitteeseen.", emailAction: "Lähetä sähköpostia" },
+  };
+
+  return translations[language] ?? translations.en;
+}
+
 export default function HomePage() {
   const { language } = useLanguage();
-  const copy = getHomeCopy(language);
+  const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+
+  const activeLanguage = mounted ? language : "en";
+  const copy = getHomeCopy(activeLanguage);
+  const contact = getContactCopy(activeLanguage);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     async function checkSession() {
@@ -1127,7 +1167,7 @@ export default function HomePage() {
           <div className="grid gap-12 lg:grid-cols-[0.72fr_1.28fr] lg:gap-20">
             <div>
               <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
-                Agronomic Workflow
+                {copy.workflowEyebrow}
               </div>
               <h2 className="mt-4 max-w-md text-4xl font-black tracking-[-0.045em] text-white sm:text-5xl">
                 {copy.workflowTitle}
@@ -1168,7 +1208,7 @@ export default function HomePage() {
           <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
             <div>
               <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
-                One Field Record
+                {copy.oneFieldRecord}
               </div>
               <h2 className="mt-4 max-w-2xl text-4xl font-black tracking-[-0.045em] text-white sm:text-5xl">
                 {copy.oneFieldTitle}
@@ -1235,7 +1275,7 @@ export default function HomePage() {
         <div className="mx-auto grid max-w-[1500px] gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:px-10 lg:py-28">
           <div>
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
-              Designed for Trust
+              {copy.trustEyebrow}
             </div>
             <h2 className="mt-4 max-w-lg text-4xl font-black tracking-[-0.045em] text-white sm:text-5xl">
               {copy.trustTitle}
@@ -1267,7 +1307,7 @@ export default function HomePage() {
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-[420px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-300/[0.025] blur-[130px]" />
         <div className="relative mx-auto max-w-4xl px-5 py-24 text-center sm:px-8 lg:py-32">
           <div className="text-[9px] font-black uppercase tracking-[0.22em] text-cyan-300">
-            Controlled Pilot 2026
+            {copy.pilotEyebrow}
           </div>
           <h2 className="mt-5 text-4xl font-black tracking-[-0.05em] text-white sm:text-6xl">
             {copy.pilotTitle}
@@ -1295,6 +1335,47 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section id="contact" className="border-t border-white/[0.06] bg-[#070c11]">
+        <div className="mx-auto grid max-w-[1500px] gap-10 px-5 py-16 sm:px-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center lg:px-10 lg:py-20">
+          <div>
+            <div className="text-[9px] font-black uppercase tracking-[0.22em] text-cyan-300">
+              {contact.eyebrow}
+            </div>
+            <h2 className="mt-4 max-w-xl text-4xl font-black tracking-[-0.045em] text-white sm:text-5xl">
+              {contact.title}
+            </h2>
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-slate-500">
+              {contact.description}
+            </p>
+          </div>
+
+          <div className="rounded-[24px] border border-white/[0.07] bg-[#0a1016] p-6 sm:p-8">
+            <div className="text-[8px] font-black uppercase tracking-[0.16em] text-slate-600">
+              AEGRIS / Official contact
+            </div>
+
+            <a
+              href="mailto:info@aegris.cz"
+              className="mt-5 block rounded-xl border border-white/[0.07] bg-[#071017] px-5 py-5 transition hover:border-cyan-300/30 hover:bg-cyan-300/[0.03]"
+            >
+              <div className="text-[7px] font-black uppercase tracking-[0.14em] text-slate-700">
+                E-mail
+              </div>
+              <div className="mt-2 break-all text-lg font-black text-cyan-300 sm:text-xl">
+                info@aegris.cz
+              </div>
+            </a>
+
+            <a
+              href="mailto:info@aegris.cz?subject=AEGRIS%20-%20dotaz%20nebo%20spolupr%C3%A1ce"
+              className="mt-5 inline-flex rounded-xl bg-cyan-300 px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#061015] transition hover:bg-cyan-200"
+            >
+              {contact.emailAction}
+            </a>
+          </div>
+        </div>
+      </section>
+
       <footer className="border-t border-white/[0.06] bg-[#05090d]">
         <div className="mx-auto flex max-w-[1500px] flex-col gap-5 px-5 py-8 sm:px-8 md:flex-row md:items-center md:justify-between lg:px-10">
           <div>
@@ -1305,8 +1386,14 @@ export default function HomePage() {
               Agronomic Intelligence
             </div>
           </div>
-          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-700">
-            © 2026 AEGRIS · Field intelligence for agronomic decisions
+          <div className="flex flex-col gap-2 text-[8px] uppercase tracking-[0.12em] text-slate-700 md:items-end">
+            <a
+              href="mailto:info@aegris.cz"
+              className="normal-case tracking-normal text-slate-500 transition hover:text-cyan-300"
+            >
+              info@aegris.cz
+            </a>
+            <div>© 2026 AEGRIS · Field intelligence for agronomic decisions</div>
           </div>
         </div>
       </footer>
